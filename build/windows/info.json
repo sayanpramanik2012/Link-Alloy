@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "0.0.1"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "0.0.1",
+			"CompanyName": "Link Alloy",
+			"FileDescription": "Independent multi-network Windows client",
+			"LegalCopyright": "Copyright 2026 Sayan Pramanik",
+			"ProductName": "Link Alloy",
+			"Comments": "Adapter inventory preview; routing engine in development"
+		}
+	}
+}

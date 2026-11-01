@@ -1,0 +1,135 @@
+name: Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-2025
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 26
+
+      - name: Validate version, notes, and readiness
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.[1-9][0-9]*)?$') { throw "Invalid release tag: $tag" }
+          $version = $tag.Substring(1)
+          if ((Get-Content VERSION -Raw).Trim() -ne $version) { throw 'Tag and VERSION file do not match.' }
+          $package = Get-Content frontend/package.json -Raw | ConvertFrom-Json
+          if ($package.version -ne $version) { throw 'frontend/package.json version is out of sync.' }
+          $readiness = Get-Content docs/RELEASE_READINESS.md -Raw
+          if ($readiness -notmatch '(?m)^release-ready:\s*true\s*$') { throw 'The independent network engine is not ready to release.' }
+          $notes = ".github/release-notes/$tag.md"
+          if (-not (Test-Path -LiteralPath $notes)) { throw "Missing release notes: $notes" }
+
+      - name: Install pinned pnpm
+        shell: pwsh
+        run: |
+          npm install --global --prefix "$env:RUNNER_TEMP\linkalloy-pnpm" pnpm@10.34.9 --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value "$env:RUNNER_TEMP\linkalloy-pnpm" -Encoding utf8
+
+      - name: Install Wails CLI
+        shell: pwsh
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.119
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Generate Wails bindings
+        run: wails3 generate bindings -clean=true -ts -i
+
+      - name: Install frontend dependencies
+        run: pnpm --dir frontend install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm --dir frontend build
+
+      - name: Verify Go packages
+        run: go test ./...
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { exit $LASTEXITCODE }
+          $nsis = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
+          if (-not (Test-Path -LiteralPath (Join-Path $nsis 'makensis.exe'))) { throw 'NSIS compiler not found.' }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $nsis -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "MAKENSIS=$(Join-Path $nsis 'makensis.exe')" -Encoding utf8
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          wails3 task windows:package INSTALL_SCOPE=user
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Prepare portable bundle and checksums
+        id: assets
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $installerSource = 'bin/linkalloy-amd64-installer.exe'
+          if (-not (Test-Path -LiteralPath $installerSource)) { throw "Installer missing: $installerSource" }
+          $releaseDir = Join-Path $env:RUNNER_TEMP 'linkalloy-release'
+          $portableDir = Join-Path $releaseDir 'LinkAlloy'
+          $licenseDir = Join-Path $portableDir 'third-party-licenses'
+          New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
+          Copy-Item 'bin/linkalloy.exe' (Join-Path $portableDir 'LinkAlloy.exe')
+          Copy-Item 'LICENSE','THIRD_PARTY_NOTICES.md' $portableDir
+          Copy-Item 'third-party/licenses/*' $licenseDir
+          $installer = Join-Path $releaseDir "LinkAlloy_Setup_$version.exe"
+          Copy-Item $installerSource $installer
+          $portable = Join-Path $releaseDir "LinkAlloy_Portable_$version.zip"
+          Compress-Archive -Path $portableDir -DestinationPath $portable -Force
+          $hashes = @((Get-FileHash $installer -Algorithm SHA256),(Get-FileHash $portable -Algorithm SHA256))
+          $hashText = $hashes | ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" }
+          $checksums = Join-Path $releaseDir 'SHA256SUMS.txt'
+          Set-Content -LiteralPath $checksums -Value $hashText -Encoding ascii
+          "installer=$installer" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "portable=$portable" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "checksums=$checksums" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $version = $tag.Substring(1)
+          $notes = ".github/release-notes/$tag.md"
+          $assets = @('${{ steps.assets.outputs.installer }}','${{ steps.assets.outputs.portable }}','${{ steps.assets.outputs.checksums }}')
+          $releaseArgs = @('release','create',$tag) + $assets + @('--title',"Link Alloy $version",'--notes-file',$notes,'--verify-tag')
+          if ([int]$version.Split('.')[0] -eq 0 -or $version -match '-') { $releaseArgs += '--prerelease' }
+          gh @releaseArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Keep only two newest releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/retain-two-releases.ps1 -Repository $env:GITHUB_REPOSITORY
+

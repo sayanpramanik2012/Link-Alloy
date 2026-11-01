@@ -1,0 +1,61 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-2025
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 26
+
+      - name: Install pinned pnpm
+        shell: pwsh
+        run: |
+          npm install --global --prefix "$env:RUNNER_TEMP\linkalloy-pnpm" pnpm@10.34.9 --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value "$env:RUNNER_TEMP\linkalloy-pnpm" -Encoding utf8
+
+      - name: Install Wails CLI
+        shell: pwsh
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.119
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Generate Wails bindings
+        run: wails3 generate bindings -clean=true -ts -i
+
+      - name: Install frontend dependencies
+        run: pnpm --dir frontend install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm --dir frontend build
+
+      - name: Compile Go packages
+        run: go test ./...
+
+      - name: Build Windows preview
+        shell: pwsh
+        run: |
+          wails3 task windows:build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
