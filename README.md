@@ -1,22 +1,30 @@
 # Link Alloy
 
-**Independent Windows development preview — routing is not implemented yet.** This repository contains a new Link Alloy codebase. The current build reads adapter metadata only; it does not start a tunnel, change routes, or modify the system proxy.
+**An independent Windows multi-link networking application.** Link Alloy is designed to route supported Windows application traffic across Ethernet, Wi-Fi, USB tethering, and other active network links. It is general-purpose and does not require app-specific launcher configuration.
 
-The product goal is a simple Windows app for people with several independent links, such as Ethernet, Wi-Fi, and USB-tethered mobile data. A future engine is planned to distribute new application connections across selected links and fail over new connections when a link drops. Existing TCP sessions may still need to reconnect if their public route changes; faster downloads are not guaranteed.
+## Development status
 
-## Current build
+The desktop dashboard is connected to a new Link Alloy Go engine. It uses stable, user-configurable connection-allocation weights, IPv4/IPv6 flow translation, interface-bound socket dialing, and bounded TCP/UDP forwarding. The engine, UI state, packet parser, and Windows build pass local checks. A 15-second elevated code-only smoke started Wintun, verified Windows route selection, sent eight HTTPS connections through two distinct egress paths, and confirmed the routes and tunnel addresses were restored. A real application download has not yet been measured under the hardened build, so no download-speed increase is claimed.
 
-- Wails v3 desktop shell with a React and TypeScript interface.
-- Read-only adapter inventory: interface name, type classification, OS link-up state, interface index, and MTU.
-- The tunnel control is disabled. This build has no TUN capture, connection scheduler, proxy listener, throughput counters, or failover.
+## How routing works
 
-## Inspiration and source boundary
+- A Windows TUN adapter captures supported system traffic while the tunnel is enabled.
+- Link Alloy assigns each new TCP or UDP connection to one healthy network link and keeps that flow on the selected link.
+- The scheduler opens the upstream socket bound to the selected Windows interface. Link eligibility is checked independently for IPv4 and IPv6; a repeated failed check changes only new-connection selection.
+- When a link drops, new connections use another healthy link. Existing connections may need to reconnect when the public route changes; Link Alloy does not stripe one TCP connection across multiple links.
+- The dashboard displays per-link bytes, fixed-window rates, active flow counts, health, diagnostics, and recent events. Its protected JSON Lines log is stored under `%ProgramData%\Link Alloy\logs\engine.jsonl`.
 
-Link Alloy is informed by publicly described approaches from [HypoMux](https://github.com/Hypostasis-Cat/HypoMux), [HypoMuxPlus](https://github.com/pmh1314520/HypoMuxPlus), and [Speedify](https://speedify.com/how-it-works/). Those projects are not affiliated with Link Alloy. No application source files from them are included in this new repository; the implementation here is written independently. Multi-link routing itself is an established concept, not a Link Alloy invention.
+The initial prototype supports unfragmented IPv4/IPv6 TCP and UDP. ICMP and fragmented IP packets are not handled yet and can fail while the system tunnel is active. The app uses short IPv4/IPv6 HTTPS probes for link health; returned public addresses are not stored in Link Alloy logs.
 
-## Build
+Starting the tunnel requires administrator access because it creates a Wintun interface and installs system routes. Link Alloy holds a system-wide session lock, writes its validated cleanup record in an administrator-protected state directory, removes only its own routes on stop, and starts a recovery watcher for an unexpected GUI exit.
 
-Prerequisites: Go 1.26.10, Node.js 26, pnpm 10, and Wails v3 CLI `v3.0.0-alpha2.119`.
+## Independent implementation and third-party components
+
+The scheduler, packet-flow mapping, per-interface dialing, route lifecycle, health orchestration, and Link Alloy UI are authored in this repository. No application source files from another multi-link product are included. Link Alloy uses the gVisor TCP/IP stack and Wintun's public driver API as separately licensed components; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+## Build on Windows
+
+Prerequisites: Go 1.27.3, Node.js 26, pnpm 10, and Wails v3 CLI `v3.0.0-alpha2.119`.
 
 ```powershell
 go mod tidy
@@ -26,14 +34,25 @@ pnpm --dir frontend build
 wails3 task windows:build
 ```
 
-The website source is in `site/index.html`. The public Pages site will publish from the `main` branch.
+The Windows build embeds the verified Wintun runtime and extracts it beside the executable on first tunnel start. The handoff is a single EXE; the NSIS installer and portable bundle include the required third-party license notices.
 
-## Versions and releases
+## Code-only engine smoke test
 
-`VERSION` reserves `0.0.1` for the first functional alpha; it is not released yet. The tag workflow verifies the version, release notes, and `docs/RELEASE_READINESS.md` before packaging. Once releases begin, the workflow keeps only the two newest GitHub Release records and leaves older source tags intact. The next patch after the first functional release will be `0.0.2`.
+`cmd/linkalloy-engine-smoke` starts the same controller without the Wails GUI or installer, makes eight new HTTPS connections through the TUN, prints per-link counters, and stops automatically after 15 seconds to 2 minutes. It requires an elevated PowerShell window and temporarily changes the Windows IPv4/IPv6 routes while active:
 
-A versioned alpha must wait until the original routing engine, traffic cleanup, and failure recovery are implemented and validated.
+```powershell
+go build -mod=mod -o bin\linkalloy-engine-smoke.exe .\cmd\linkalloy-engine-smoke
+.\bin\linkalloy-engine-smoke.exe -duration 30s
+```
+
+Run `.\bin\linkalloy-engine-smoke.exe -recover-only` from an elevated PowerShell window to process a saved cleanup journal without starting a tunnel.
+
+Use the smoke command only when a brief system-wide route handoff is acceptable. It verifies the tunnel path and rollback; it does not replace a controlled application download test.
+
+## Release status
+
+Version `0.0.1` is reserved for the first functional alpha and has not been released. The release workflow stays blocked until live tunnel operation, route rollback, failover, and a controlled multi-link application test have been validated. Once releases start, automation keeps the two newest GitHub Release records.
 
 ## License
 
-Original Link Alloy source is proprietary and all rights are reserved. Third-party dependencies retain their own licenses; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). No license can guarantee that code will never be copied; this notice states the permitted use of Link Alloy's original source.
+Link Alloy-authored source is proprietary and all rights are reserved. Third-party components retain their own licenses. The Link Alloy license applies only to source code whose rights Link Alloy controls.

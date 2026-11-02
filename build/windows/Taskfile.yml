@@ -4,34 +4,22 @@ includes:
   common: ../Taskfile.yml
 
 vars:
-  # Signing configuration - edit these values for your project
-  # SIGN_CERTIFICATE: "path/to/certificate.pfx"
-  # SIGN_THUMBPRINT: "certificate-thumbprint"  # Alternative to SIGN_CERTIFICATE
-  # TIMESTAMP_SERVER: "http://timestamp.digicert.com"
-  #
-  # Password is stored securely in system keychain. Run: wails3 setup signing
-
-  # Docker image for cross-compilation with CGO (used when CGO_ENABLED=1 on non-Windows)
-  CROSS_IMAGE: wails-cross
+  ARCH: '{{.ARCH | default "amd64"}}'
 
 tasks:
   build:
-    summary: Builds the application for Windows
+    summary: Builds Link Alloy for Windows
     cmds:
-      # Auto-detect CGO: if CGO_ENABLED=1, use Docker; otherwise use native Go cross-compile
-      - task: '{{if and (ne OS "windows") (eq .CGO_ENABLED "1")}}build:docker{{else}}build:native{{end}}'
+      - task: build:native
         vars:
           ARCH: '{{.ARCH}}'
           DEV: '{{.DEV}}'
           EXTRA_TAGS: '{{.EXTRA_TAGS}}'
           OBFUSCATED: '{{.OBFUSCATED}}'
           GARBLE_ARGS: '{{.GARBLE_ARGS}}'
-    vars:
-      # Default to CGO_ENABLED=0 if not explicitly set
-      CGO_ENABLED: '{{.CGO_ENABLED | default "0"}}'
 
   build:native:
-    summary: Builds the application using native Go cross-compilation
+    summary: Builds the Windows executable and copies its signed TUN runtime
     internal: true
     deps:
       - task: common:go:mod:tidy
@@ -46,56 +34,25 @@ tasks:
       - task: common:generate:icons
     preconditions:
       - sh: '{{if eq .OBFUSCATED "true"}}command -v garble >/dev/null 2>&1{{else}}true{{end}}'
-        msg: "garble is required for obfuscated builds. Install it with: go install mvdan.cc/garble@v0.16.0 (requires Go 1.24+). See https://github.com/burrowers/garble/releases for version/toolchain compatibility."
+        msg: "garble is required for obfuscated builds."
     cmds:
       - task: generate:syso
         vars:
           ARCH: '{{.ARCH}}'
+      - powershell.exe -NoProfile -NonInteractive -Command "New-Item -ItemType Directory -Path '{{.BIN_DIR}}' -Force | Out-Null"
       - '{{if eq .OBFUSCATED "true"}}garble {{.GARBLE_ARGS}} build{{else}}go build{{end}} {{.BUILD_FLAGS}} -o "{{.BIN_DIR}}/{{.APP_NAME}}.exe"'
-      - cmd: powershell Remove-item *.syso
-        platforms: [windows]
-      - cmd: rm -f *.syso
-        platforms: [linux, darwin]
+      - powershell.exe -NoProfile -NonInteractive -Command "Copy-Item -LiteralPath 'third-party/wintun/{{.WINTUN_ARCH}}/wintun.dll' -Destination '{{.BIN_DIR}}/wintun.dll' -Force"
+      - powershell.exe -NoProfile -NonInteractive -Command "Remove-Item *.syso -Force -ErrorAction SilentlyContinue"
     vars:
+      WINTUN_ARCH: '{{if eq .ARCH "arm64"}}arm64{{else}}amd64{{end}}'
       BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui"{{end}}'
     env:
       GOOS: windows
-      CGO_ENABLED: '{{.CGO_ENABLED | default "0"}}'
-      GOARCH: '{{.ARCH | default ARCH}}'
-
-  build:docker:
-    summary: Cross-compiles for Windows using Docker with Zig (for CGO builds on non-Windows)
-    internal: true
-    deps:
-      - task: common:build:frontend
-        vars:
-          OBFUSCATED:
-            ref: .OBFUSCATED
-      - task: common:generate:icons
-    preconditions:
-      - sh: docker info > /dev/null 2>&1
-        msg: "Docker is required for CGO cross-compilation. Please install Docker."
-      - sh: docker image inspect {{.CROSS_IMAGE}} > /dev/null 2>&1
-        msg: |
-          Docker image '{{.CROSS_IMAGE}}' not found.
-          Build it first: wails3 task setup:docker
-    cmds:
-      - task: generate:syso
-        vars:
-          ARCH: '{{.ARCH}}'
-      - docker run --rm -v "{{.ROOT_DIR}}:/app" {{.DOCKER_MOUNTS}} -e APP_NAME="{{.APP_NAME}}" {{if .EXTRA_TAGS}}-e EXTRA_TAGS="{{.EXTRA_TAGS}}"{{end}} {{if eq .OBFUSCATED "true"}}-e OBFUSCATED=true{{end}} {{if .GARBLE_ARGS}}-e GARBLE_ARGS="{{.GARBLE_ARGS}}"{{end}} {{.CROSS_IMAGE}} windows {{.DOCKER_ARCH}}
-      - cmd: docker run --rm -v "{{.ROOT_DIR}}:/app" alpine chown -R $(id -u):$(id -g) /app/bin
-        platforms: [linux, darwin]
-      - rm -f *.syso
-    vars:
-      DOCKER_ARCH: '{{.ARCH | default "amd64"}}'
-      # Generate Docker volume mounts: Go module cache + go.mod replace directives
-      # Uses wails3 tool docker-mounts for cross-platform compatibility (Windows/Linux/macOS)
-      DOCKER_MOUNTS:
-        sh: 'wails3 tool docker-mounts'
+      GOARCH: '{{.ARCH}}'
+      CGO_ENABLED: '0'
 
   package:
-    summary: Packages the application
+    summary: Packages the Windows application
     cmds:
       - task: '{{if eq (.FORMAT | default "nsis") "msix"}}create:msix:package{{else}}create:nsis:installer{{end}}'
         vars:
@@ -105,15 +62,15 @@ tasks:
       INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
 
   generate:syso:
-    summary: Generates Windows `.syso` file
+    summary: Generates the Windows application manifest and icon resources
     dir: build
     cmds:
       - wails3 generate syso -arch {{.ARCH}} -icon windows/icon.ico -manifest windows/wails.exe.manifest -info windows/info.json -out ../wails_windows_{{.ARCH}}.syso
     vars:
-      ARCH: '{{.ARCH | default ARCH}}'
+      ARCH: '{{.ARCH | default "amd64"}}'
 
   create:nsis:installer:
-    summary: Creates an NSIS installer
+    summary: Creates the Windows NSIS installer
     dir: build/windows/nsis
     deps:
       - task: build
@@ -121,7 +78,6 @@ tasks:
       - sh: '[ "{{.INSTALL_SCOPE}}" = "user" ] || [ "{{.INSTALL_SCOPE}}" = "machine" ]'
         msg: "INSTALL_SCOPE must be 'user' or 'machine', got '{{.INSTALL_SCOPE}}'"
     cmds:
-      # Create the Microsoft WebView2 bootstrapper if it doesn't exist
       - wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/nsis"
       - |
         {{if eq OS "windows"}}
@@ -130,61 +86,45 @@ tasks:
         makensis {{if eq .INSTALL_SCOPE "user"}}-DWAILS_INSTALL_SCOPE=user -DREQUEST_EXECUTION_LEVEL=user {{end}}-DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" project.nsi
         {{end}}
     vars:
-      ARCH: '{{.ARCH | default ARCH}}'
+      ARCH: '{{.ARCH | default "amd64"}}'
       ARG_FLAG: '{{if eq .ARCH "amd64"}}AMD64{{else}}ARM64{{end}}'
       INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
 
   create:msix:package:
-    summary: Creates an MSIX package
+    summary: Creates a Windows MSIX package
     deps:
       - task: build
     cmds:
-      - |-
-        wails3 tool msix \
-          --config "{{.ROOT_DIR}}/wails.json" \
-          --name "{{.APP_NAME}}" \
-          --executable "{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" \
-          --arch "{{.ARCH}}" \
-          --out "{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}-{{.ARCH}}.msix" \
-          {{if .CERT_PATH}}--cert "{{.CERT_PATH}}"{{end}} \
-          {{if .PUBLISHER}}--publisher "{{.PUBLISHER}}"{{end}} \
-          {{if .USE_MSIX_TOOL}}--use-msix-tool{{else}}--use-makeappx{{end}}
+      - >-
+        wails3 tool msix
+        --config "{{.ROOT_DIR}}/wails.json"
+        --name "{{.APP_NAME}}"
+        --executable "{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe"
+        --arch "{{.ARCH}}"
+        --out "{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}-{{.ARCH}}.msix"
+        {{if .CERT_PATH}}--cert "{{.CERT_PATH}}"{{end}}
+        {{if .PUBLISHER}}--publisher "{{.PUBLISHER}}"{{end}}
+        {{if .USE_MSIX_TOOL}}--use-msix-tool{{else}}--use-makeappx{{end}}
     vars:
-      ARCH: '{{.ARCH | default ARCH}}'
+      ARCH: '{{.ARCH | default "amd64"}}'
       CERT_PATH: '{{.CERT_PATH | default ""}}'
       PUBLISHER: '{{.PUBLISHER | default ""}}'
       USE_MSIX_TOOL: '{{.USE_MSIX_TOOL | default "false"}}'
 
-  install:msix:tools:
-    summary: Installs tools required for MSIX packaging
-    cmds:
-      - wails3 tool msix-install-tools
-
   run:
+    summary: Runs the Windows development executable
     cmds:
       - '{{.BIN_DIR}}/{{.APP_NAME}}.exe'
 
   sign:
     summary: Signs the Windows executable
-    desc: |
-      Signs the .exe with an Authenticode certificate.
-      Set SIGN_CERTIFICATE or SIGN_THUMBPRINT to override the certificate
-      configured globally via `wails3 setup` (~/.config/wails/defaults.yaml).
-      Password is retrieved from system keychain (run: wails3 setup signing)
     deps:
       - task: build
     cmds:
-      # Certificate vars are optional: if unset, `wails3 tool sign` falls back to
-      # the certificate configured globally via `wails3 setup`.
       - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.exe" {{if .SIGN_CERTIFICATE}}--certificate "{{.SIGN_CERTIFICATE}}"{{end}} {{if .SIGN_THUMBPRINT}}--thumbprint "{{.SIGN_THUMBPRINT}}"{{end}} {{if .TIMESTAMP_SERVER}}--timestamp "{{.TIMESTAMP_SERVER}}"{{end}}
 
   sign:installer:
-    summary: Signs the NSIS installer
-    desc: |
-      Creates and signs the NSIS installer.
-      Set SIGN_CERTIFICATE or SIGN_THUMBPRINT to override the certificate
-      configured globally via `wails3 setup` (~/.config/wails/defaults.yaml).
-      Password is retrieved from system keychain (run: wails3 setup signing)
+    summary: Signs the Windows NSIS installer
     deps:
       - task: create:nsis:installer
         vars:

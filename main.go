@@ -3,7 +3,9 @@ package main
 import (
 	"embed"
 	"log"
+	"os"
 
+	"github.com/sayanpramanik2012/Link-Alloy/internal/engine"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -11,14 +13,34 @@ import (
 var assets embed.FS
 
 func main() {
+	if parentPID, watch, err := engine.IsRecoveryWatchdogArgument(os.Args); watch {
+		if err != nil {
+			log.Print(err)
+			return
+		}
+		if err := engine.RunRecoveryWatchdog(parentPID); err != nil {
+			log.Print(err)
+		}
+		return
+	}
+	release, err := engine.AcquireProcessLock()
+	if err != nil {
+		log.Printf("Link Alloy was not started: %v", err)
+		return
+	}
+	defer release()
+	networkService := NewNetworkService()
+	stopWatchdog, watchdogErr := engine.StartRecoveryWatchdog()
+	if watchdogErr != nil {
+		log.Printf("crash recovery watcher is unavailable: %v", watchdogErr)
+	}
 	app := application.New(application.Options{
 		Name:        "Link Alloy",
 		Description: "Independent multi-network Windows client",
 		Services: []application.Service{
-			application.NewService(&NetworkService{}),
+			application.NewService(networkService),
 		},
 		Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets)},
-		Mac:    application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
 	})
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
@@ -31,7 +53,15 @@ func main() {
 		URL:              "/",
 	})
 
-	if err := app.Run(); err != nil {
-		log.Fatal(err)
+	runErr := app.Run()
+	cleanupErr := networkService.Shutdown()
+	if stopWatchdog != nil {
+		stopWatchdog()
+	}
+	if cleanupErr != nil {
+		log.Printf("tunnel cleanup failed during application exit: %v", cleanupErr)
+	}
+	if runErr != nil {
+		log.Fatal(runErr)
 	}
 }

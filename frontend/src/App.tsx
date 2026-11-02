@@ -1,153 +1,408 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { NetworkService } from "../bindings/github.com/sayanpramanik2012/Link-Alloy";
+import type { AppView, LinkStatus, RuntimeStatus, TrafficSample, AdapterSummary, TunnelLogEntry } from "./types";
+import type { LinkPolicy } from "./components/SettingsView";
+import { Sidebar } from "./components/Sidebar";
+import { ThroughputChart } from "./components/ThroughputChart";
+import { LinkCard } from "./components/LinkCard";
+import { ConnectionsView } from "./components/ConnectionsView";
+import { ActivityFeed } from "./components/ActivityFeed";
+import { SettingsView } from "./components/SettingsView";
+import { formatBytes, formatDurationSince, formatRate } from "./format";
+import { buildPreviewSnapshot, previewAdapters } from "./previewData";
+import { appendRollingSample, errorReducer, isStale, pollInterval, withTimeout } from "./state-utils";
 
-type AdapterList = NonNullable<Awaited<ReturnType<typeof NetworkService.ListAdapters>>>;
-type Adapter = AdapterList[number];
+const views: Record<AppView, { title: string; eyebrow: string; description: string }> = {
+  overview: { title: "Overview", eyebrow: "NETWORK CONTROL", description: "See which links are carrying your traffic and how the tunnel is behaving." },
+  connections: { title: "Connections", eyebrow: "FLOW DISTRIBUTION", description: "Review live connection counts and traffic totals by link." },
+  activity: { title: "Activity", eyebrow: "LOCAL AUDIT TRAIL", description: "Track tunnel, link-health, and connection events recorded on this device." },
+  settings: { title: "Settings", eyebrow: "LINK ALLOY CONFIGURATION", description: "Set eligible links and relative connection weights." },
+};
 
-function adapterGlyph(kind: string) {
-  if (kind === "wifi") return "≈";
-  if (kind === "ethernet") return "⇄";
-  if (kind === "cellular") return "▥";
-  return "⌁";
+const emptyStatus: RuntimeStatus = { state: "stopped", links: [], transport: {}, logDropped: 0 };
+
+function sumBy(links: LinkStatus[], field: "recvBytesPerSec" | "sendBytesPerSec" | "bytesReceived" | "bytesSent") {
+  return links.reduce((total, link) => total + Number(link[field] || 0), 0);
 }
 
 function App() {
-  const [adapters, setAdapters] = useState<Adapter[]>([]);
-  const [loading, setLoading] = useState(true);
+  const previewMode = import.meta.env.DEV && new URLSearchParams(window.location.search).get("preview") === "1";
+  const [view, setView] = useState<AppView>("overview");
+  const [adapters, setAdapters] = useState<AdapterSummary[]>([]);
+  const [status, setStatus] = useState<RuntimeStatus>(emptyStatus);
+  const [logs, setLogs] = useState<TunnelLogEntry[]>([]);
+  const [history, setHistory] = useState<TrafficSample[]>([]);
+  const [policies, setPolicies] = useState<Record<number, LinkPolicy>>({});
+  const [logPath, setLogPath] = useState("");
+  const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const activeCount = useMemo(() => adapters.filter((adapter) => adapter.isUp).length, [adapters]);
+  const [actionPending, setActionPending] = useState(false);
+  const [savingIndex, setSavingIndex] = useState<number | null>(null);
+  const [errors, dispatchErrors] = useReducer(errorReducer, { actionError: "", refreshError: "" });
+  const [notice, setNotice] = useState("");
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const inFlight = useRef(false);
+  const statusRef = useRef<RuntimeStatus>(emptyStatus);
 
-  const refreshAdapters = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      setAdapters((await NetworkService.ListAdapters()) ?? []);
-      setError("");
-      setLastUpdated(new Date());
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Adapter discovery is unavailable.");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+  const tunnelActive = status.state === "running";
+  const tunnelBusy = actionPending || status.state === "starting" || status.state === "stopping";
+  const links = status.links ?? [];
+  const totalDownloadRate = sumBy(links, "recvBytesPerSec");
+  const totalUploadRate = sumBy(links, "sendBytesPerSec");
+  const totalReceived = sumBy(links, "bytesReceived");
+  const totalSent = sumBy(links, "bytesSent");
+  const activeConnections = links.reduce((total, link) => total + link.activeConnections, 0);
+  const usableLinks = links.filter((link) => link.available && link.enabled !== false).length;
+  const viewInfo = views[view];
+  const serviceWithPolicy = NetworkService as unknown as {
+    ConfigureLink?: (index: number, enabled: boolean, weight: number) => PromiseLike<void>;
+  };
+  const configureAvailable = !previewMode && typeof serviceWithPolicy.ConfigureLink === "function";
+
+  const refreshSnapshot = useCallback(async (manual = false) => {
+    if (inFlight.current) {
+      if (manual) setRefreshing(false);
+      return;
     }
-  }, []);
+    inFlight.current = true;
+    if (manual) setRefreshing(true);
+    if (previewMode) {
+      const preview = buildPreviewSnapshot();
+      const previous = statusRef.current;
+      if (previous.state !== "running") setHistory([]);
+      statusRef.current = preview.status;
+      setAdapters(previewAdapters);
+      setStatus(preview.status);
+      setLogs(preview.logs);
+      setLogPath(preview.logPath);
+      const sample: TrafficSample = {
+        at: Date.now(),
+        download: sumBy(preview.status.links ?? [], "recvBytesPerSec"),
+        upload: sumBy(preview.status.links ?? [], "sendBytesPerSec"),
+      };
+      setHistory((current) => appendRollingSample(current, sample));
+      setLastUpdated(Date.now());
+      dispatchErrors({ type: "poll-result", message: "" });
+      setInitialLoading(false);
+      if (manual) setRefreshing(false);
+      inFlight.current = false;
+      return;
+    }
+    const results = await Promise.allSettled([
+      withTimeout(NetworkService.ListAdapters(), 8000, "Adapter refresh"),
+      withTimeout(NetworkService.GetTunnelStatus(), 8000, "Tunnel status refresh"),
+      withTimeout(NetworkService.GetTunnelLogs(), 8000, "Activity log refresh"),
+      withTimeout(NetworkService.GetLogFilePath(), 8000, "Log path refresh"),
+    ] as const);
+
+    const failures: string[] = [];
+    const adapterResult = results[0];
+    const statusResult = results[1];
+    const logsResult = results[2];
+    const pathResult = results[3];
+
+    if (adapterResult.status === "fulfilled") setAdapters(adapterResult.value ?? []);
+    else failures.push(adapterResult.reason instanceof Error ? adapterResult.reason.message : "Adapter list unavailable");
+
+    if (statusResult.status === "fulfilled") {
+      const nextStatus = (statusResult.value ?? emptyStatus) as RuntimeStatus;
+      const previous = statusRef.current;
+      if (nextStatus.state === "running" && previous.state !== "running") {
+        setHistory([]);
+      }
+      statusRef.current = nextStatus;
+      setStatus(nextStatus);
+      setLastUpdated(Date.now());
+      if (nextStatus.state === "running") {
+        const point: TrafficSample = {
+          at: Date.now(),
+          download: sumBy(nextStatus.links ?? [], "recvBytesPerSec"),
+          upload: sumBy(nextStatus.links ?? [], "sendBytesPerSec"),
+        };
+        setHistory((current) => appendRollingSample(current, point));
+      }
+    } else failures.push(statusResult.reason instanceof Error ? statusResult.reason.message : "Tunnel state unavailable");
+
+    if (logsResult.status === "fulfilled") setLogs(logsResult.value ?? []);
+    else failures.push(logsResult.reason instanceof Error ? logsResult.reason.message : "Activity log unavailable");
+
+    if (pathResult.status === "fulfilled") setLogPath(pathResult.value ?? "");
+    else failures.push(pathResult.reason instanceof Error ? pathResult.reason.message : "Log path unavailable");
+
+    dispatchErrors({ type: "poll-result", message: failures.length ? failures[0] : "" });
+    setInitialLoading(false);
+    if (manual) setRefreshing(false);
+    inFlight.current = false;
+  }, [previewMode]);
 
   useEffect(() => {
-    void refreshAdapters();
-    const timer = window.setInterval(() => void refreshAdapters(), 5000);
-    return () => window.clearInterval(timer);
-  }, [refreshAdapters]);
+    let stopped = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      if (stopped) return;
+      await refreshSnapshot();
+      if (!stopped) {
+        const active = statusRef.current.state === "running";
+        timer = window.setTimeout(poll, pollInterval(active ? "running" : "stopped"));
+      }
+    };
+    void poll();
+    return () => {
+      stopped = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [refreshSnapshot]);
+
+  useEffect(() => {
+    const byIndex = new Map((status.links ?? []).map((link) => [link.index, link]));
+    setPolicies((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const adapter of adapters) {
+        const link = byIndex.get(adapter.index);
+        const existing = next[adapter.index];
+        if (!existing) {
+          next[adapter.index] = { enabled: link?.enabled ?? adapter.isUp, weight: link?.weight ?? 1, dirty: false };
+          changed = true;
+        } else if (!existing.dirty && link && (existing.enabled !== link.enabled || existing.weight !== link.weight)) {
+          next[adapter.index] = { enabled: link.enabled ?? existing.enabled, weight: link.weight, dirty: false };
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [adapters, status.links]);
+
+  const handleTunnelToggle = async () => {
+    if (tunnelBusy || previewMode) return;
+    setActionPending(true);
+    dispatchErrors({ type: "action-started" });
+    setNotice("");
+    try {
+      if (tunnelActive) {
+        await withTimeout(NetworkService.StopTunnel(), 45000, "Tunnel stop");
+      } else {
+        await withTimeout(NetworkService.StartTunnel(), 60000, "Tunnel start");
+      }
+      await refreshSnapshot(true);
+    } catch (cause) {
+      dispatchErrors({ type: "action-failed", message: cause instanceof Error ? cause.message : "The tunnel action failed." });
+      await refreshSnapshot();
+    } finally {
+      setActionPending(false);
+    }
+  };
+
+  const updatePolicy = (index: number, policy: LinkPolicy) => {
+    setPolicies((current) => ({ ...current, [index]: policy }));
+  };
+
+  const applyPolicy = async (index: number) => {
+    const policy = policies[index];
+    const configure = serviceWithPolicy.ConfigureLink;
+    if (!configure || !policy || savingIndex !== null) return;
+    setSavingIndex(index);
+    dispatchErrors({ type: "action-started" });
+    try {
+      await withTimeout(configure(index, policy.enabled, policy.weight), 10000, "Link settings save");
+      setPolicies((current) => ({ ...current, [index]: { ...policy, dirty: false } }));
+      await refreshSnapshot(true);
+    } catch (cause) {
+      dispatchErrors({ type: "action-failed", message: cause instanceof Error ? cause.message : "Could not save link settings." });
+    } finally {
+      setSavingIndex(null);
+    }
+  };
+
+  const copyLogPath = async () => {
+    if (!logPath) return;
+    try {
+      await navigator.clipboard.writeText(logPath);
+      setNotice("Log location copied to clipboard.");
+    } catch {
+      setNotice("Clipboard access is unavailable. Select the log location in Settings to copy it manually.");
+    }
+  };
+
+  const clearActionError = () => dispatchErrors({ type: "action-dismissed" });
+  const connectedInterfaces = adapters.filter((adapter) => adapter.isUp).length;
+  const stale = isStale(lastUpdated);
+  const tunnelLabel = previewMode ? "Visual preview" : tunnelBusy ? "Working" : tunnelActive ? "Tunnel active" : status.state === "error" ? "Needs attention" : "Tunnel off";
+  const pageTitle = viewInfo.title;
 
   return (
     <div className="app-shell">
-      <aside className="sidebar" aria-label="Link Alloy">
-        <div className="brand-mark" aria-hidden="true"><span>L</span><i /></div>
-        <div className="sidebar-divider" />
-        <div className="sidebar-current" aria-current="page" title="Overview">⌂</div>
-        <div className="sidebar-foot">0.0.1</div>
-      </aside>
-
+      <Sidebar active={view} onChange={setView} />
       <main className="workspace">
         <header className="topbar">
-          <div className="breadcrumb"><span>LINK ALLOY</span><b>/</b><strong>Overview</strong></div>
-          <span className="build-pill"><i /> Independent development build</span>
+          <div className="breadcrumb"><span>LINK ALLOY</span><b>/</b><strong>{pageTitle}</strong></div>
+          <div className="topbar-status">
+            <span className={`build-pill ${previewMode ? "build-pill-preview" : tunnelActive ? "build-pill-live" : status.state === "error" ? "build-pill-error" : ""}`} aria-live="polite">
+              <i aria-hidden="true" />{tunnelLabel}
+            </span>
+            <span className={`sync-label ${stale ? "sync-label-stale" : ""}`}>{previewMode ? "Sample values" : lastUpdated ? stale ? "Status delayed" : "Live status" : "Connecting"}</span>
+          </div>
         </header>
 
         <div className="page-content">
-          <section className="intro">
+          <section className="page-title-row">
             <div>
-              <p className="eyebrow">MULTI-LINK DESKTOP · DEVELOPMENT PREVIEW</p>
-              <h1>Bring your links<br /><span>into one view.</span></h1>
-              <p className="intro-copy">Link Alloy is being rebuilt as an independent Windows application. This preview reads adapter status only; it does not route or alter network traffic.</p>
+              <p className="eyebrow">{viewInfo.eyebrow}</p>
+              <h1>{pageTitle}</h1>
+              <p className="page-description">{viewInfo.description}</p>
             </div>
-            <div className="status-orb" aria-label="Routing engine not available in this build">
-              <div className="orb-ring ring-one" />
-              <div className="orb-ring ring-two" />
-              <div className="orb-core">LA</div>
-              <span className="orb-label">ENGINE IN DEVELOPMENT</span>
-            </div>
+            <button className="icon-button refresh-action" type="button" onClick={() => void refreshSnapshot(true)} disabled={refreshing} aria-label="Refresh network status" title="Refresh status">
+              <span className={refreshing ? "refresh-icon spinning" : "refresh-icon"} aria-hidden="true">↻</span>
+            </button>
           </section>
 
-          <section className="engine-panel" aria-labelledby="engine-title">
-            <div className="engine-panel-main">
-              <div className="engine-title-row">
-                <div className="engine-icon">⇄</div>
-                <div>
-                  <p className="eyebrow">ROUTING ENGINE</p>
-                  <h2 id="engine-title">Not active in this build</h2>
-                </div>
-              </div>
-              <p className="engine-description">The independent routing engine has not been implemented yet. No traffic is being redirected, and no tunnel or system proxy is started.</p>
-              <button className="primary-button" type="button" disabled title="Routing is not implemented in this development preview">
-                <span className="button-dot" /> Tunnel unavailable
-              </button>
-            </div>
-            <div className="engine-panel-side">
-              <span className="side-label">CURRENT MODE</span>
-              <strong>Adapter discovery only</strong>
-              <span className="side-note">Read-only · local device</span>
-            </div>
-          </section>
+          {previewMode && <div className="preview-banner" role="note"><strong>Visual preview</strong><span>Sample values only · not live telemetry · controls are disabled · no network routes are changed</span></div>}
 
-          <section className="adapter-section" aria-labelledby="adapter-title">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">YOUR WINDOWS DEVICE</p>
-                <h2 id="adapter-title">Network adapters <span className="count-badge">{adapters.length}</span></h2>
-              </div>
-              <div className="section-actions">
-                {lastUpdated && <span className="updated-label">Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
-                <button className="refresh-button" type="button" onClick={() => void refreshAdapters()} disabled={refreshing} aria-label="Refresh adapter list">
-                  <span className={refreshing ? "refresh-icon spinning" : "refresh-icon"}>↻</span> Refresh
-                </button>
-              </div>
-            </div>
+          {errors.actionError && <div className="toast-banner toast-error" role="alert"><span>{errors.actionError}</span><button type="button" onClick={clearActionError} aria-label="Dismiss error">×</button></div>}
+          {status.state === "error" && status.lastError && status.lastError !== errors.actionError && <div className="toast-banner toast-error" role="alert"><span>{status.lastError}</span></div>}
+          {errors.refreshError && <div className="refresh-warning" role="status">Some live data is delayed: {errors.refreshError}</div>}
+          {notice && <div className="toast-banner toast-success" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice("")} aria-label="Dismiss message">×</button></div>}
 
-            {error && <div className="error-banner" role="alert">{error}</div>}
-            {loading ? (
-              <div className="empty-state"><div className="loader" /><p>Reading adapter state…</p></div>
-            ) : adapters.length === 0 ? (
-              <div className="empty-state"><div className="empty-icon">⌁</div><h3>No non-loopback adapters detected</h3><p>Connect Ethernet, Wi-Fi, or a tethered device, then refresh.</p></div>
-            ) : (
-              <div className="adapter-grid">
-                {adapters.map((adapter) => (
-                  <article className={`adapter-card ${adapter.isUp ? "is-up" : "is-down"}`} key={adapter.index}>
-                    <div className="adapter-card-top">
-                      <div className={`adapter-glyph ${adapter.kind}`}>{adapterGlyph(adapter.kind)}</div>
-                      <span className={`interface-state ${adapter.isUp ? "up" : "down"}`}><i />{adapter.isUp ? "Interface up" : "Interface down"}</span>
-                    </div>
-                    <h3 title={adapter.name}>{adapter.name}</h3>
-                    <p className="adapter-kind">{adapter.kindLabel}</p>
-                    <div className="adapter-meta"><span>Interface index</span><strong>{adapter.index}</strong></div>
-                    <div className="adapter-meta"><span>MTU</span><strong>{adapter.mtu || "—"}</strong></div>
-                    <div className="telemetry-placeholder"><span className="telemetry-line" /><span>Traffic telemetry will arrive with the routing engine</span></div>
-                  </article>
-                ))}
-              </div>
-            )}
-            <p className="adapter-count-note">{activeCount} interface(s) currently report as up. This does not confirm internet reachability.</p>
-          </section>
+          {view === "overview" && (
+            <OverviewView
+              adapters={adapters}
+              links={links}
+              active={tunnelActive}
+              busy={tunnelBusy}
+              initialLoading={initialLoading}
+              onToggle={() => void handleTunnelToggle()}
+              preview={previewMode}
+              status={status}
+              history={history}
+              downloadRate={totalDownloadRate}
+              uploadRate={totalUploadRate}
+              totalReceived={totalReceived}
+              totalSent={totalSent}
+              activeConnections={activeConnections}
+              transport={status.transport}
+              usableLinks={usableLinks}
+              connectedInterfaces={connectedInterfaces}
+              logs={logs}
+              logPath={logPath}
+            />
+          )}
+          {view === "connections" && <ConnectionsView adapters={adapters} links={links} active={tunnelActive} transport={status.transport} preview={previewMode} />}
+          {view === "activity" && <ActivityFeed entries={logs} path={logPath} />}
+          {view === "settings" && (
+            <SettingsView
+              adapters={adapters}
+              links={links}
+              policies={policies}
+              tunnelState={status.state}
+              logPath={logPath}
+              transport={status.transport}
+              preview={previewMode}
+              configureAvailable={configureAvailable}
+              savingIndex={savingIndex}
+              onPolicyChange={updatePolicy}
+              onApplyPolicy={(index) => void applyPolicy(index)}
+              onCopyLogPath={() => void copyLogPath()}
+            />
+          )}
 
-          <section className="roadmap" aria-labelledby="roadmap-title">
-            <div>
-              <p className="eyebrow">BUILD STATUS</p>
-              <h2 id="roadmap-title">A separate implementation, in stages.</h2>
-            </div>
-            <div className="roadmap-items">
-              <div className="roadmap-item complete"><span>01</span><div><strong>Windows desktop shell</strong><small>Complete</small></div></div>
-              <div className="roadmap-item complete"><span>02</span><div><strong>Read-only adapter inventory</strong><small>Complete</small></div></div>
-              <div className="roadmap-item planned"><span>03</span><div><strong>Independent multi-link connection engine</strong><small>In development</small></div></div>
-              <div className="roadmap-item planned"><span>04</span><div><strong>All-app tunnel and new-flow failover</strong><small>Planned · existing sessions may reconnect</small></div></div>
-            </div>
-          </section>
-
-          <footer className="footer">
-            <span>Link Alloy · development preview · no routing active</span>
-            <span>Inspired by publicly described multi-link approaches; no upstream source code is included in this project.</span>
+          <footer className="app-footer">
+            <span>Link Alloy · Windows network control</span>
+            <span>{previewMode ? "Sample values only · no system changes" : tunnelActive ? `${formatDurationSince(status.since)} active` : "Local adapter telemetry"} · No speed gain is guaranteed</span>
           </footer>
         </div>
       </main>
+    </div>
+  );
+}
+
+function OverviewView(props: {
+  adapters: AdapterSummary[];
+  links: LinkStatus[];
+  active: boolean;
+  busy: boolean;
+  initialLoading: boolean;
+  onToggle: () => void;
+  preview: boolean;
+  status: RuntimeStatus;
+  history: TrafficSample[];
+  downloadRate: number;
+  uploadRate: number;
+  totalReceived: number;
+  totalSent: number;
+  activeConnections: number;
+  transport?: RuntimeStatus["transport"];
+  usableLinks: number;
+  connectedInterfaces: number;
+  logs: TunnelLogEntry[];
+  logPath: string;
+}) {
+  const byIndex = new Map(props.links.map((link) => [link.index, link]));
+  const stateText = props.preview ? "Dashboard layout preview" : props.busy ? "Updating routes" : props.active ? "Your traffic is flowing" : props.status.state === "error" ? "The tunnel needs attention" : "System routing is paused";
+  const stateHelp = props.preview
+    ? "Example values are shown to review the layout. No Windows routes are installed and no network traffic is being measured."
+    : props.busy
+    ? "Link Alloy is preparing or restoring Windows routes. Keep this window open until the status settles."
+    : props.active
+      ? "Supported new TCP/UDP connections are assigned to healthy links. Existing flows stay on their selected path."
+      : props.status.state === "error"
+        ? "Review the error above and the activity log before retrying."
+        : "Start the tunnel to route supported traffic from Windows applications across eligible links.";
+  const currentLinkCount = props.active ? props.usableLinks : props.connectedInterfaces;
+  const currentLinkLabel = props.active ? "healthy links" : "interfaces up";
+
+  return (
+    <div className="overview-layout">
+      <div className="overview-main-column">
+        <section className={`tunnel-hero ${props.active ? "tunnel-hero-active" : ""}`} aria-labelledby="tunnel-status-title" aria-busy={props.busy}>
+          <div className="tunnel-hero-copy">
+            <div className="tunnel-state-line"><span className={`state-marker ${props.active ? "state-marker-active" : ""}`} /><span>{props.preview ? "VISUAL PREVIEW" : props.active ? "TUNNEL ACTIVE" : props.busy ? "IN PROGRESS" : props.status.state === "error" ? "ACTION REQUIRED" : "READY"}</span></div>
+            <h2 id="tunnel-status-title">{stateText}</h2>
+            <p>{stateHelp}</p>
+            <button className={`primary-button ${props.active ? "primary-button-stop" : "primary-button-start"}`} type="button" onClick={props.onToggle} disabled={props.preview || props.busy || props.initialLoading} aria-label={props.preview ? "Tunnel controls are disabled in visual preview" : props.active ? "Stop Link Alloy tunnel" : "Start Link Alloy tunnel"}>
+              <span className="button-dot" aria-hidden="true" />{props.preview ? "Preview only" : props.busy ? "Please wait…" : props.active ? "Stop tunnel" : "Start tunnel"}
+            </button>
+            {!props.active && !props.preview && <span className="hero-permission">Administrator access is required to install system routes.</span>}
+          </div>
+          <div className="tunnel-hero-side">
+            <div className="hero-stat"><span>Eligible links</span><strong>{currentLinkCount}</strong><small>{currentLinkLabel}</small></div>
+            <div className="hero-stat"><span>Active connections</span><strong>{props.active ? props.activeConnections : 0}</strong><small>{props.active && props.transport ? `${props.transport.activeTCP ?? 0} TCP · ${props.transport.activeUDP ?? 0} UDP` : "Current tunnel session"}</small></div>
+            <div className="hero-stat"><span>Session duration</span><strong>{props.active ? formatDurationSince(props.status.since) : "—"}</strong><small>{props.active ? "Since start" : "Tunnel stopped"}</small></div>
+          </div>
+        </section>
+
+        <div className="overview-metric-grid">
+          <div className="overview-metric"><span className="metric-label metric-download"><i aria-hidden="true" />Download</span><strong>{formatRate(props.downloadRate)}</strong><small>{props.active ? `${formatBytes(props.totalReceived)} received this session` : "No active tunnel traffic"}</small></div>
+          <div className="overview-metric"><span className="metric-label metric-upload"><i aria-hidden="true" />Upload</span><strong>{formatRate(props.uploadRate)}</strong><small>{props.active ? `${formatBytes(props.totalSent)} sent this session` : "No active tunnel traffic"}</small></div>
+        </div>
+
+        <ThroughputChart samples={props.history} download={props.downloadRate} upload={props.uploadRate} loading={props.busy} preview={props.preview} />
+
+        <section className="panel network-panel" aria-labelledby="network-links-title">
+          <div className="panel-header">
+            <div><p className="eyebrow">AVAILABLE PATHS</p><h2 id="network-links-title">Network links</h2></div>
+            <span className="panel-caption">{props.adapters.length} adapter{props.adapters.length === 1 ? "" : "s"} detected</span>
+          </div>
+          {props.initialLoading ? (
+            <div className="skeleton-list" aria-label="Loading network links"><span /><span /></div>
+          ) : props.adapters.length === 0 ? (
+            <div className="empty-panel"><strong>No network links detected</strong><p>Connect Ethernet, Wi-Fi, or a tethered device and refresh.</p></div>
+          ) : (
+            <div className="link-card-list">
+              {props.adapters.map((adapter) => <LinkCard key={adapter.index} adapter={adapter} link={byIndex.get(adapter.index)} tunnelActive={props.active} />)}
+            </div>
+          )}
+          <p className="section-footnote">Traffic totals include Link Alloy flows only. Link health is measured by an egress check.</p>
+        </section>
+      </div>
+      <aside className="overview-rail">
+        <ActivityFeed entries={props.logs} compact path={props.logPath} />
+        <section className="panel operating-panel">
+          <p className="eyebrow">OPERATING MODEL</p>
+          <h2>One link per connection</h2>
+          <p>New flows use an eligible network. A single connection is not split across adapters, and active sessions may reconnect if their link drops.</p>
+          <div className="operating-protocols"><span>IPv4 + IPv6</span><span>TCP + UDP</span></div>
+        </section>
+      </aside>
     </div>
   );
 }

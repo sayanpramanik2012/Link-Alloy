@@ -20,41 +20,41 @@
     </header>
     <main id="top" class="wrap">
       <section class="hero">
-        <div class="eyebrow">INDEPENDENT WINDOWS IMPLEMENTATION · DEVELOPMENT PREVIEW</div>
+        <div class="eyebrow">INDEPENDENT WINDOWS MULTI-LINK NETWORKING</div>
         <h1>More links, one clear <span>control.</span></h1>
-        <p class="lead">Link Alloy is being developed for people who connect a Windows PC to more than one independent internet link. The current preview discovers adapters; it does not route traffic or claim a speed boost.</p>
+        <p class="lead">Link Alloy is a general-purpose Windows networking app designed to route supported system traffic across Ethernet, Wi-Fi, USB tethering, and other active links. It does not require launcher-specific setup.</p>
         <div class="actions"><a class="button" href="https://github.com/sayanpramanik2012/Link-Alloy">Follow development <span aria-hidden="true">↗</span></a><a class="button secondary" href="https://github.com/sayanpramanik2012/Link-Alloy/blob/main/docs/PRODUCT_OVERVIEW.md">Product overview</a></div>
-        <div class="status"><i aria-hidden="true"></i> Routing engine in development · no installer released</div>
+        <div class="status"><i aria-hidden="true"></i> Code-only tunnel smoke passed · no functional release yet</div>
       </section>
 
       <section id="scope" class="section">
-        <h2>What the current preview does</h2>
-        <p class="intro">The starter app is intentionally read-only. It shows network interface names, type, operating-system link state, index, and MTU. It does not change proxies, routes, adapters, or traffic.</p>
+        <h2>What Link Alloy is building</h2>
+        <p class="intro">The desktop control panel is connected to a new Go routing engine. A short elevated smoke verified Wintun startup, Windows route selection, eight HTTPS flows across two egress paths, and route restoration. A sustained application download and link-loss failover still need validation.</p>
         <div class="grid">
-          <article class="card"><span class="num">01 / DISCOVER</span><h3>List available adapters</h3><p>See Ethernet, Wi-Fi, tethered devices, and other non-loopback interfaces reported by Windows.</p></article>
-          <article class="card"><span class="num">02 / DESIGN</span><h3>Develop a new engine</h3><p>The connection scheduler, traffic capture, and adapter telemetry are being implemented in this new codebase.</p></article>
-          <article class="card"><span class="num">03 / VALIDATE</span><h3>Test before release</h3><p>The routing feature will not be advertised as usable until local tests verify traffic distribution and cleanup behavior.</p></article>
+          <article class="card"><span class="num">01 / SELECT</span><h3>Route new connections</h3><p>Link Alloy assigns each supported TCP or UDP flow to one healthy network adapter.</p></article>
+          <article class="card"><span class="num">02 / OBSERVE</span><h3>See traffic by link</h3><p>Review per-link health, live upload/download rates, byte totals, active flows, and recent engine events.</p></article>
+          <article class="card"><span class="num">03 / RECOVER</span><h3>Restore Windows routes</h3><p>A cleanup journal tracks the temporary routes so Link Alloy can restore them when stopped or recover after a restart.</p></article>
         </div>
       </section>
 
       <section id="origin" class="section">
-        <h2>Approach and inspiration</h2>
-        <p class="intro">Multi-link networking is an established category. Link Alloy is a separate implementation informed by publicly described behavior; this repository contains no source files from these products and is not affiliated with them.</p>
+        <h2>Independent implementation</h2>
+        <p class="intro">Link Alloy's scheduler, packet mapping, Windows route lifecycle, and interface selection are authored in this repository. The app uses the gVisor TCP/IP stack and Wintun's public driver API as third-party components under separate licenses. No application source files from other multi-link products are included.</p>
         <div class="compare">
-          <article class="card"><span class="num">LOCAL CONNECTION SCHEDULING</span><h3>Link Alloy’s planned model</h3><p>Assign each new connection to one selected adapter. Existing TCP sessions may reconnect if their public route changes; no zero-interruption claim is made.</p></article>
+          <article class="card"><span class="num">LOCAL CONNECTION SCHEDULING</span><h3>One path per new flow</h3><p>Assign each new connection to one selected adapter. One TCP connection is not split across links. Existing sessions may reconnect after a route or public-IP change.</p></article>
           <article class="card"><span class="num">OTHER PUBLISHED DESIGNS</span><h3>Different trade-offs</h3><p><a href="https://github.com/Hypostasis-Cat/HypoMux">HypoMux</a> and <a href="https://github.com/pmh1314520/HypoMuxPlus">HypoMuxPlus</a> document connection-level approaches. <a href="https://support.speedify.com/article/273-how-speedify-works">Speedify</a> describes packet-level distribution with server-side reassembly.</p></article>
         </div>
       </section>
 
       <section id="preview" class="section">
         <h2>Application preview</h2>
-        <div class="preview"><div><strong>Clean-room UI capture pending</strong><small>Real application screenshots will be added after the standalone preview is opened and captured.</small></div></div>
+        <div class="preview"><div><strong>Updated application capture pending</strong><small>A verified desktop screenshot will be added after the Windows tunnel and controls are validated.</small></div></div>
       </section>
 
       <section class="section">
-        <div class="limits"><strong>Performance note:</strong> The current preview does not route any traffic. Future per-connection scheduling will not make every download faster; results depend on independent uplinks, server concurrency, and link conditions. An existing connection may need to reconnect after a path change.</div>
+        <div class="limits"><strong>Prototype limits:</strong> The current engine supports unfragmented IPv4/IPv6 TCP and UDP. ICMP and fragmented packets are not handled yet. A single connection stays on one link, and no download-speed increase or zero-interruption failover is guaranteed. Link health uses short IPv4 and IPv6 HTTPS probes; returned public addresses are not saved in Link Alloy logs.</div>
       </section>
     </main>
-    <footer class="footer wrap"><span>Link Alloy · independent development preview · no release yet</span><span>Original code: <a href="https://github.com/sayanpramanik2012/Link-Alloy/blob/main/LICENSE">All rights reserved</a> · Third-party components keep their own terms.</span></footer>
+    <footer class="footer wrap"><span>Link Alloy · independent Windows development build · no functional release yet</span><span>Original code: <a href="https://github.com/sayanpramanik2012/Link-Alloy/blob/main/LICENSE">All rights reserved</a> · Third-party components keep their own terms.</span></footer>
   </body>
 </html>

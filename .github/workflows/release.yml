@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: windows-release-publication
   cancel-in-progress: false
 
 jobs:
@@ -17,20 +17,24 @@ jobs:
     runs-on: windows-2025
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: true
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 26
+
+      - name: Verify signed Wintun runtimes
+        shell: pwsh
+        run: ./tools/verify-wintun.ps1
 
       - name: Validate version, notes, and readiness
         shell: pwsh
@@ -68,8 +72,41 @@ jobs:
       - name: Build frontend
         run: pnpm --dir frontend build
 
+      - name: Test dashboard state and polling
+        run: pnpm --dir frontend test
+
+      - name: Audit frontend dependencies
+        run: pnpm --dir frontend audit --audit-level=low
+
       - name: Verify Go packages
-        run: go test ./...
+        run: go test -mod=mod -count=1 ./...
+
+      - name: Analyze Go code
+        run: go vet -mod=mod ./...
+
+      - name: Check reachable Go vulnerabilities
+        run: go run -mod=mod golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+      - name: Fuzz packet parsing without changing routes
+        run: go test -mod=mod ./internal/engine -run '^$' -fuzz '^FuzzFlowTablePacketParsing$' -fuzztime=10s -parallel=2
+
+      - name: Load required signing certificate
+        shell: pwsh
+        env:
+          SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:SIGNING_PFX_PASSWORD)) { throw 'Public release requires the Windows signing certificate and password secrets.' }
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'linkalloy-release-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:SIGNING_PFX_BASE64))
+            $password = ConvertTo-SecureString -String $env:SIGNING_PFX_PASSWORD -AsPlainText -Force
+            $certificates = @(Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password | Where-Object HasPrivateKey)
+            if ($certificates.Count -ne 1) { throw 'Expected exactly one signing certificate with a private key.' }
+            "LINKALLOY_SIGNING_THUMBPRINT=$($certificates[0].Thumbprint)" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+          } finally {
+            if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
+          }
 
       - name: Install NSIS
         shell: pwsh
@@ -81,11 +118,29 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_PATH -Value $nsis -Encoding utf8
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "MAKENSIS=$(Join-Path $nsis 'makensis.exe')" -Encoding utf8
 
-      - name: Build Windows installer
+      - name: Build and sign the Windows application
         shell: pwsh
         run: |
-          wails3 task windows:package INSTALL_SCOPE=user
+          wails3 task windows:build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./tools/sign-windows.ps1 -InputPath 'bin/linkalloy.exe'
+
+      - name: Package protected machine installation
+        shell: pwsh
+        run: |
+          wails3 generate webview2bootstrapper -dir 'build/windows/nsis'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binary = (Resolve-Path -LiteralPath 'bin/linkalloy.exe').Path
+          Push-Location 'build/windows/nsis'
+          try {
+            makensis '-DWAILS_INSTALL_SCOPE=machine' '-DREQUEST_EXECUTION_LEVEL=admin' '-DLINKALLOY_SIGN_RELEASE' "-DARG_WAILS_AMD64_BINARY=$binary" project.nsi
+            if ($LASTEXITCODE -ne 0) { throw 'NSIS release packaging failed.' }
+          } finally { Pop-Location }
+          ./tools/sign-windows.ps1 -InputPath 'bin/linkalloy-amd64-installer.exe'
+
+      - name: Verify signed release executables
+        shell: pwsh
+        run: ./tools/verify-windows-signatures.ps1 -InputPath 'bin/linkalloy.exe','bin/linkalloy-amd64-installer.exe' -ExpectedThumbprint $env:LINKALLOY_SIGNING_THUMBPRINT
 
       - name: Prepare portable bundle and checksums
         id: assets
@@ -132,4 +187,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./tools/retain-two-releases.ps1 -Repository $env:GITHUB_REPOSITORY
+
+      - name: Remove temporary signing credential
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:LINKALLOY_SIGNING_THUMBPRINT -match '^[A-Fa-f0-9]{40}$') {
+            $certificatePath = "Cert:\CurrentUser\My\$env:LINKALLOY_SIGNING_THUMBPRINT"
+            if (Test-Path -LiteralPath $certificatePath) { Remove-Item -LiteralPath $certificatePath -DeleteKey -Force }
+          }
 
