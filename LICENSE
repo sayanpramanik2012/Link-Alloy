@@ -1,5 +1,40 @@
+Link Alloy Source-Available Attribution License v1.0
+
 Copyright (c) 2026 Sayan Pramanik. All rights reserved.
 
-This notice applies only to original Link Alloy source code in this repository. You may view the source on GitHub. You may not copy, modify, redistribute, sublicense, or create derivative works from Link Alloy source without prior written permission from the copyright holder.
+This license applies only to original Link Alloy source code and original Link Alloy materials whose rights are controlled by Sayan Pramanik. It does not apply to third-party components, generated files, trademarks, logos, or external dependencies listed in THIRD_PARTY_NOTICES.md.
 
-Third-party components and generated files remain subject to their own licenses. See THIRD_PARTY_NOTICES.md. Nothing in this notice overrides rights granted by those third-party licenses.
+1. Permission to view and run
+
+You may view this repository. You may download and run an official, unmodified Link Alloy release on devices and networks that you own or are authorized to manage.
+
+You may make a private local copy solely for evaluation, testing, or internal use. Private internal use does not include offering Link Alloy functionality to third parties, hosting it as a service, or distributing a copy outside your organization.
+
+2. Attribution
+
+Any permitted public reference to Link Alloy must retain this notice and include the following attribution:
+
+“Based on Link Alloy by Sayan Pramanik — https://github.com/sayanpramanik2012/Link-Alloy”
+
+3. Restricted actions
+
+Without prior written permission from Sayan Pramanik, you may not:
+
+- Copy, publish, redistribute, sublicense, or sell Link Alloy source code.
+- Create or distribute a fork, derivative work, rebranded build, or competing product based on Link Alloy source.
+- Include Link Alloy source or substantial portions of it in another application, service, package, installer, or repository.
+- Remove copyright, attribution, license, or provenance notices from a permitted copy.
+- Use the Link Alloy name, logo, or branding to imply that another product is official or endorsed.
+
+4. No implied rights
+
+All rights not expressly granted in this license are reserved by the copyright holder. Viewing the repository or using GitHub’s repository features does not grant rights to copy, modify, redistribute, or create derivative software. GitHub’s platform terms and functionality may permit repository viewing or forking, but any resulting copy remains subject to this license.
+
+5. Third-party components
+
+Third-party components retain their own licenses. Nothing in this license limits rights that those licenses independently grant for those components.
+
+6. Warranty and liability
+
+Link Alloy is provided “as is,” without warranties of any kind. To the maximum extent permitted by law, the copyright holder is not liable for damages arising from use, inability to use, network changes, interrupted connections, lost data, or security incidents.
+

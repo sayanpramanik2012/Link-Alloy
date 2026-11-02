@@ -1,6 +1,6 @@
 # Third-party notices
 
-Link Alloy uses third-party tools and runtime packages. They remain under their respective upstream licenses; the proprietary Link Alloy notice does not relicense those components.
+Link Alloy uses third-party tools and runtime packages. They remain under their respective upstream licenses; the Link Alloy Source-Available Attribution License does not relicense those components.
 
 - Wails v3 and its generated framework build templates: MIT License; text included as [`third-party/licenses/LICENSE-Wails.txt`](third-party/licenses/LICENSE-Wails.txt).
 - React and React DOM: MIT License; texts included in `third-party/licenses/`.
