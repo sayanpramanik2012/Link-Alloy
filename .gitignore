@@ -6,6 +6,7 @@ frontend/bindings
 frontend/.test-dist
 .playwright-cli/
 output/playwright/
+output-site-qa.png
 vendor/
 *.syso
 build/windows/nsis/MicrosoftEdgeWebview2Setup.exe

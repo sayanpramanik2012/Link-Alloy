@@ -1,8 +1,36 @@
 # Link Alloy
 
+<p align="center">
+  <strong>Independent Windows multi-link networking</strong><br>
+  <sub>Route new supported connections across healthy links with one clear control panel.</sub>
+</p>
+
+<p align="center">
+  <a href="https://github.com/sayanpramanik2012/Link-Alloy/actions/workflows/ci.yml"><img src="https://github.com/sayanpramanik2012/Link-Alloy/actions/workflows/ci.yml/badge.svg?branch=main" alt="Windows CI"></a>
+  <a href="https://github.com/sayanpramanik2012/Link-Alloy/actions/workflows/pages.yml"><img src="https://github.com/sayanpramanik2012/Link-Alloy/actions/workflows/pages.yml/badge.svg?branch=main" alt="GitHub Pages"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-1f6feb" alt="Windows 10 and 11">
+  <img src="https://img.shields.io/badge/status-alpha-e6be73" alt="Alpha release">
+</p>
+
+<p align="center"><a href="https://sayanpramanik2012.github.io/Link-Alloy/">Website</a> · <a href="https://github.com/sayanpramanik2012/Link-Alloy/releases">Releases</a> · <a href="docs/PRODUCT_OVERVIEW.md">Product overview</a> · <a href="docs/CODE_AUDIT_2026-11-01.md">Engineering audit</a></p>
+
 Link Alloy is an independent Windows application that routes new connections across Ethernet, Wi-Fi, USB tethering, and other eligible adapters.
 
 It addresses a practical problem: a Windows PC can have multiple independent internet links while a download workload uses only one of them.
+
+## Contents
+
+1. [What Link Alloy solves](#what-link-alloy-solves)
+2. [The important behavior](#the-important-behavior)
+3. [Quick start](#quick-start)
+4. [Dashboard](#dashboard)
+5. [Supported traffic and limits](#supported-traffic-and-limits)
+6. [Recovery and local data](#recovery-and-local-data)
+7. [Engine smoke test](#engine-smoke-test)
+8. [Build on Windows](#build-on-windows)
+9. [Validation status](#validation-status)
+10. [Independent implementation](#independent-implementation)
+11. [License and attribution](#license-and-attribution)
 
 ## What it does
 
