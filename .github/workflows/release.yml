@@ -42,11 +42,12 @@ jobs:
           $tag = $env:GITHUB_REF_NAME
           if ($tag -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.[1-9][0-9]*)?$') { throw "Invalid release tag: $tag" }
           $version = $tag.Substring(1)
+          $alpha = $tag -eq 'v0.0.1'
           if ((Get-Content VERSION -Raw).Trim() -ne $version) { throw 'Tag and VERSION file do not match.' }
           $package = Get-Content frontend/package.json -Raw | ConvertFrom-Json
           if ($package.version -ne $version) { throw 'frontend/package.json version is out of sync.' }
           $readiness = Get-Content docs/RELEASE_READINESS.md -Raw
-          if ($readiness -notmatch '(?m)^release-ready:\s*true\s*$') { throw 'The independent network engine is not ready to release.' }
+          if (-not $alpha -and $readiness -notmatch '(?m)^release-ready:\s*true\s*$') { throw 'The independent network engine is not ready to release.' }
           $notes = ".github/release-notes/$tag.md"
           if (-not (Test-Path -LiteralPath $notes)) { throw "Missing release notes: $notes" }
 
@@ -91,6 +92,7 @@ jobs:
         run: go test -mod=mod ./internal/engine -run '^$' -fuzz '^FuzzFlowTablePacketParsing$' -fuzztime=10s -parallel=2
 
       - name: Load required signing certificate
+        if: ${{ github.ref_name != 'v0.0.1' }}
         shell: pwsh
         env:
           SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
@@ -109,6 +111,7 @@ jobs:
           }
 
       - name: Install NSIS
+        if: ${{ github.ref_name != 'v0.0.1' }}
         shell: pwsh
         run: |
           choco install nsis --yes --no-progress
@@ -123,9 +126,10 @@ jobs:
         run: |
           wails3 task windows:build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./tools/sign-windows.ps1 -InputPath 'bin/linkalloy.exe'
+          if ($env:GITHUB_REF_NAME -ne 'v0.0.1') { ./tools/sign-windows.ps1 -InputPath 'bin/linkalloy.exe' }
 
       - name: Package protected machine installation
+        if: ${{ github.ref_name != 'v0.0.1' }}
         shell: pwsh
         run: |
           wails3 generate webview2bootstrapper -dir 'build/windows/nsis'
@@ -139,6 +143,7 @@ jobs:
           ./tools/sign-windows.ps1 -InputPath 'bin/linkalloy-amd64-installer.exe'
 
       - name: Verify signed release executables
+        if: ${{ github.ref_name != 'v0.0.1' }}
         shell: pwsh
         run: ./tools/verify-windows-signatures.ps1 -InputPath 'bin/linkalloy.exe','bin/linkalloy-amd64-installer.exe' -ExpectedThumbprint $env:LINKALLOY_SIGNING_THUMBPRINT
 
@@ -148,7 +153,8 @@ jobs:
         run: |
           $version = $env:GITHUB_REF_NAME.Substring(1)
           $installerSource = 'bin/linkalloy-amd64-installer.exe'
-          if (-not (Test-Path -LiteralPath $installerSource)) { throw "Installer missing: $installerSource" }
+          $alpha = $version -eq '0.0.1'
+          if (-not $alpha -and -not (Test-Path -LiteralPath $installerSource)) { throw "Installer missing: $installerSource" }
           $releaseDir = Join-Path $env:RUNNER_TEMP 'linkalloy-release'
           $portableDir = Join-Path $releaseDir 'LinkAlloy'
           $licenseDir = Join-Path $portableDir 'third-party-licenses'
@@ -156,11 +162,11 @@ jobs:
           Copy-Item 'bin/linkalloy.exe' (Join-Path $portableDir 'LinkAlloy.exe')
           Copy-Item 'LICENSE','THIRD_PARTY_NOTICES.md' $portableDir
           Copy-Item 'third-party/licenses/*' $licenseDir
-          $installer = Join-Path $releaseDir "LinkAlloy_Setup_$version.exe"
-          Copy-Item $installerSource $installer
           $portable = Join-Path $releaseDir "LinkAlloy_Portable_$version.zip"
           Compress-Archive -Path $portableDir -DestinationPath $portable -Force
-          $hashes = @((Get-FileHash $installer -Algorithm SHA256),(Get-FileHash $portable -Algorithm SHA256))
+          $hashes = @((Get-FileHash $portable -Algorithm SHA256))
+          $installer = ''
+          if (-not $alpha) { $installer = Join-Path $releaseDir "LinkAlloy_Setup_$version.exe"; Copy-Item $installerSource $installer; $hashes += Get-FileHash $installer -Algorithm SHA256 }
           $hashText = $hashes | ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" }
           $checksums = Join-Path $releaseDir 'SHA256SUMS.txt'
           Set-Content -LiteralPath $checksums -Value $hashText -Encoding ascii
@@ -176,7 +182,9 @@ jobs:
           $tag = $env:GITHUB_REF_NAME
           $version = $tag.Substring(1)
           $notes = ".github/release-notes/$tag.md"
-          $assets = @('${{ steps.assets.outputs.installer }}','${{ steps.assets.outputs.portable }}','${{ steps.assets.outputs.checksums }}')
+          $assets = @()
+          if ('${{ steps.assets.outputs.installer }}' -ne '') { $assets += '${{ steps.assets.outputs.installer }}' }
+          $assets += @('${{ steps.assets.outputs.portable }}','${{ steps.assets.outputs.checksums }}')
           $releaseArgs = @('release','create',$tag) + $assets + @('--title',"Link Alloy $version",'--notes-file',$notes,'--verify-tag')
           if ([int]$version.Split('.')[0] -eq 0 -or $version -match '-') { $releaseArgs += '--prerelease' }
           gh @releaseArgs

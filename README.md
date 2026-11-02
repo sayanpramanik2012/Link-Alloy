@@ -132,7 +132,7 @@ This repository is Windows-only. Android, iOS, Linux, macOS, and Docker build sc
 
 Local checks include Go tests, lifecycle tests, go vet, packet-parser fuzzing, Go vulnerability scanning, frontend state tests, production frontend build, dependency audit, Wintun hash/signature verification, and a Windows executable build.
 
-The public release remains blocked until forced-process recovery, physical link-loss failover, a controlled launcher comparison, and Windows signing secrets are completed.
+The first `v0.0.1` alpha is an unsigned portable prerelease. Later public releases remain blocked until forced-process recovery, physical link-loss failover, a controlled launcher comparison, and Windows signing secrets are completed.
 
 ## Independent implementation
 
