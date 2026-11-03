@@ -6,6 +6,10 @@ Scope: current local working tree in `C:\Users\sayan\Documents\GitHub\Link-Alloy
 
 The findings were used as the implementation backlog. The priority-one items are now addressed in the local working tree: strict protected state and journal validation, a global process lock, cancellable startup, nonfatal flow-capacity handling, bounded transport admission, safe packet-buffer lifetime, fixed-window telemetry, per-family health, bounded logging, persistent link controls, a redesigned dashboard, Vite 8.1.6, and signed-release gates. The remaining release gates are live validation tasks rather than unimplemented code: forced-process recovery, physical link-loss failover, a controlled real application comparison, and release certificate provisioning. The original finding text remains below as the baseline audit record.
 
+### Scheduler follow-up — 4 November 2026
+
+The scheduler no longer treats connection counts as the only signal. It keeps the configured weights as the target, samples a fixed two-second byte window, and steers new flows away from a link carrying the larger recent Link Alloy load. A regression test covers the saturated-Ethernet/idle-Wi-Fi case. This improves multi-connection launchers, but it does not split an already-established TCP connection; a single Steam flow still cannot be turned into 100 Mbps + 100 Mbps without protocol-level multipath or a remote relay.
+
 Priority: P1 means fix before another public distribution; P2 means fix before calling the alpha reliable; P3 means maintenance or product completeness. Findings below are based on inspected code. Runtime consequences not reproduced are identified as such.
 
 1. **P1 — Elevated recovery interpolates untrusted journal strings into PowerShell.**
