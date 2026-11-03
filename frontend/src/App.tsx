@@ -399,7 +399,7 @@ function OverviewView(props: {
         <section className="panel operating-panel">
           <p className="eyebrow">OPERATING MODEL</p>
           <h2>One link per connection</h2>
-          <p>New flows use an eligible network. A single connection is not split across adapters, and active sessions may reconnect if their link drops.</p>
+          <p>New flows use an eligible network and prefer the less-loaded healthy link. A single connection is not split across adapters, and active sessions may reconnect if their link drops.</p>
           <div className="operating-protocols"><span>IPv4 + IPv6</span><span>TCP + UDP</span></div>
         </section>
       </aside>

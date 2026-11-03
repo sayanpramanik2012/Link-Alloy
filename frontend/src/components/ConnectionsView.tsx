@@ -17,7 +17,7 @@ export function ConnectionsView({ adapters, links, active, transport, preview = 
       <section className="page-intro">
         <p className="eyebrow">LIVE FLOW DISTRIBUTION</p>
         <h1>Connections</h1>
-        <p>{preview ? "Sample path assignments for layout review; no live connections are being read." : "Link Alloy assigns each supported new flow to one network path. Existing flows stay on their selected link until they close or need to reconnect."}</p>
+        <p>{preview ? "Sample path assignments for layout review; no live connections are being read." : "Link Alloy assigns each supported new flow to one network path and steers new work away from a recently busy link. Existing flows stay on their selected link until they close or need to reconnect."}</p>
       </section>
 
       <section className="connection-summary-grid" aria-label="Connection summary">

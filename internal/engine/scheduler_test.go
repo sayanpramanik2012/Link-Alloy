@@ -45,6 +45,28 @@ func TestAcquireUsesWeightedRoundRobinAcrossNewFlows(t *testing.T) {
 	}
 }
 
+func TestAcquirePrefersUnderutilizedLinkForNewFlow(t *testing.T) {
+	scheduler := NewScheduler([]Link{
+		{Index: 4, Name: "Ethernet", Weight: 1, Available: true},
+		{Index: 9, Name: "Wi-Fi", Weight: 1, Available: true},
+	})
+	first, err := scheduler.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	first.reportAt(now, 0, 20<<20)
+	next, err := scheduler.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.LinkIndex() == first.LinkIndex() {
+		t.Fatalf("new flow stayed on saturated link %d", next.LinkIndex())
+	}
+	first.Release()
+	next.Release()
+}
+
 func TestAcquireSkipsUnavailableAndReturnsWhenAllLinksAreDown(t *testing.T) {
 	scheduler := NewScheduler([]Link{
 		{Index: 4, Name: "Ethernet", Weight: 4, Available: false},

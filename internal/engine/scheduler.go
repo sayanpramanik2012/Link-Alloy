@@ -48,8 +48,12 @@ type linkState struct {
 	buckets              [rateBuckets]trafficBucket
 }
 
-// Scheduler uses stable, explicitly configured capacity weights. Observed demand
-// is telemetry only: polling must never change routing decisions.
+// Scheduler uses explicitly configured weights as a target, then uses the
+// recent byte rate of Link Alloy flows to keep new connections away from a
+// saturated link. This matters for launchers that open several long-lived
+// connections: a connection-count-only scheduler can place a large transfer on
+// one link while the other link is idle. Existing connections remain pinned to
+// their selected link; only new connections can be balanced here.
 type Scheduler struct {
 	mu      sync.Mutex
 	links   map[uint32]*linkState
@@ -125,8 +129,20 @@ func (s *Scheduler) AcquireExcludingForFamily(excluded map[uint32]struct{}, ipv6
 func (s *Scheduler) acquire(excluded map[uint32]struct{}, ipv6 *bool) (*Lease, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	tick := time.Now().UnixNano() / int64(rateBucketDuration)
+	type candidate struct {
+		state       *linkState
+		weight      float64
+		activeShare float64
+		rateShare   float64
+		pressure    float64
+	}
+	candidates := make([]candidate, 0, len(s.order))
 	var chosen *linkState
+	chosenPressure := math.Inf(1)
 	eligibleWeight := 0.0
+	totalRate := 0.0
+	totalActive := 0
 	for _, idx := range s.order {
 		st := s.links[idx]
 		l := st.link
@@ -140,19 +156,56 @@ func (s *Scheduler) acquire(excluded map[uint32]struct{}, ipv6 *bool) (*Lease, e
 			continue
 		}
 		eligibleWeight += l.Weight
-		st.deficit += l.Weight
-		if chosen == nil || st.deficit > chosen.deficit || (st.deficit == chosen.deficit && s.lastTie == chosen.link.Index && idx != s.lastTie) {
-			chosen = st
-		}
+		sent, received := s.sampleAtLocked(st, tick)
+		rate := (float64(sent) + float64(received)) / rateWindow.Seconds()
+		totalRate += rate
+		totalActive += st.active
+		candidates = append(candidates, candidate{state: st, weight: l.Weight, rateShare: rate})
 	}
-	if chosen == nil {
+	if len(candidates) == 0 {
 		return nil, ErrNoHealthyLink
+	}
+	// Keep the original deficit scheduler as the deterministic fallback when
+	// there is no recent traffic to balance. Once traffic exists, compare each
+	// link's observed share with its configured target share. The active-flow
+	// share is a small tie-breaker that prevents repeatedly assigning new flows
+	// to the same idle link before its first bytes are reported.
+	for i := range candidates {
+		c := &candidates[i]
+		c.state.deficit += c.weight
+		if totalRate > 0 {
+			c.rateShare = (c.rateShare / totalRate) / (c.weight / eligibleWeight)
+		} else {
+			c.rateShare = 0
+		}
+		if totalActive > 0 {
+			c.activeShare = (float64(c.state.active) / float64(totalActive)) / (c.weight / eligibleWeight)
+		}
+		c.pressure = c.rateShare*0.8 + c.activeShare*0.2
+	}
+	for _, c := range candidates {
+		if chosen == nil || c.pressure < chosenPressure || (c.pressure == chosenPressure && c.state.deficit > chosen.deficit) || (c.pressure == chosenPressure && c.state.deficit == chosen.deficit && s.lastTie == chosen.link.Index && c.state.link.Index != s.lastTie) {
+			chosen = c.state
+			chosenPressure = c.pressure
+		}
 	}
 	chosen.deficit -= eligibleWeight
 	chosen.active++
 	s.lastTie = chosen.link.Index
 	return &Lease{scheduler: s, index: chosen.link.Index, state: chosen}, nil
 }
+
+func (s *Scheduler) sampleAtLocked(st *linkState, tick int64) (uint64, uint64) {
+	var sent, received uint64
+	for _, b := range st.buckets {
+		if b.tick > tick-int64(rateWindow/rateBucketDuration) && b.tick <= tick {
+			sent += b.sent
+			received += b.received
+		}
+	}
+	return sent, received
+}
+
 func (s *Scheduler) SetAvailable(index uint32, available bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -183,13 +236,7 @@ func (s *Scheduler) snapshotsAt(now time.Time) []LinkSnapshot {
 	tick := now.UnixNano() / int64(rateBucketDuration)
 	for _, idx := range s.order {
 		st := s.links[idx]
-		var sent, recv uint64
-		for _, b := range st.buckets {
-			if b.tick > tick-int64(rateWindow/rateBucketDuration) && b.tick <= tick {
-				sent += b.sent
-				recv += b.received
-			}
-		}
+		sent, recv := s.sampleAtLocked(st, tick)
 		health := st.link.Health
 		if health == "" {
 			if st.link.Available {

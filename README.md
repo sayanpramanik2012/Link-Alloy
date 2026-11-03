@@ -34,12 +34,13 @@ It addresses a practical problem: a Windows PC can have multiple independent int
 
 ## What it does
 
-Link Alloy captures supported routed traffic through a Windows tunnel, assigns each new TCP or UDP connection to a healthy link, and binds the upstream socket to that adapter. The dashboard shows link health, active connections, throughput, totals, diagnostics, and recent activity.
+Link Alloy captures supported routed traffic through a Windows tunnel, assigns each new TCP or UDP connection to a healthy link, and binds the upstream socket to that adapter. New flows use the configured weights as a target and are biased away from a link that is carrying the most recent Link Alloy bytes. The dashboard shows link health, active connections, throughput, totals, diagnostics, and recent activity.
 
 Link Alloy is connection-level scheduling:
 
 - Equal weights give new connections equal scheduling opportunity.
 - Multi-connection downloads can use Ethernet and Wi-Fi together.
+- When one link is busy and another is healthy but idle, new connections prefer the less-loaded link.
 - A connection already assigned to one link stays on that link.
 - Weight changes affect new connections.
 - New connections can move to another link after a health failure.
