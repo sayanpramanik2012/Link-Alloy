@@ -34,13 +34,13 @@ It addresses a practical problem: a Windows PC can have multiple independent int
 
 ## What it does
 
-Link Alloy captures supported routed traffic through a Windows tunnel, assigns each new TCP or UDP connection to a healthy link, and binds the upstream socket to that adapter. New flows use the configured weights as a target and are biased away from a link that is carrying the most recent Link Alloy bytes. The dashboard shows link health, active connections, throughput, totals, diagnostics, and recent activity.
+Link Alloy captures supported routed traffic through a Windows tunnel, assigns each new TCP or UDP connection to a healthy link, and binds the upstream socket to that adapter. Version 0.0.2 rotates new connections within application/service groups using configured weights, so background traffic does not dictate every new download path. The dashboard shows link health, active connections, throughput, totals, diagnostics, and recent activity.
 
 Link Alloy is connection-level scheduling:
 
 - Equal weights give new connections equal scheduling opportunity.
 - Multi-connection downloads can use Ethernet and Wi-Fi together.
-- When one link is busy and another is healthy but idle, new connections prefer the less-loaded link.
+- Atomic assignment spreads connection bursts across eligible links, including pools with more than two adapters.
 - A connection already assigned to one link stays on that link.
 - Weight changes affect new connections.
 - New connections can move to another link after a health failure.
@@ -50,13 +50,13 @@ No speed increase or zero-interruption failover is guaranteed. Results depend on
 
 ## Quick start
 
-The portable handoff is a single executable: LinkAlloy.exe.
+Download **Link Alloy Portable.exe** from [Releases](https://github.com/sayanpramanik2012/Link-Alloy/releases). No ZIP or installer is needed. Save the EXE in a writable folder; the embedded Wintun runtime is extracted beside it on first use. Windows WebView2 must be installed. License and third-party notices are embedded and readable in Settings.
 
 Run it as administrator.
 
 1. Connect the Ethernet, Wi-Fi, or tethered links you want to use.
 2. Close older Link Alloy windows or engine-test processes.
-3. Run LinkAlloy.exe with Run as administrator.
+3. Run Link Alloy Portable.exe with Run as administrator.
 4. Open Settings and enable the intended links and relative weights.
 5. Return to Overview and press Start tunnel.
 6. Wait for the links to show their health state.
@@ -69,11 +69,11 @@ Do not run two Link Alloy windows at the same time. A Windows session lock preve
 ## Dashboard
 
 - Overview: tunnel status, combined throughput, rolling history, and link cards.
-- Connections: active counts, packet counters, and per-link totals.
+- Connections: per-link totals plus application/PID, connection ID, selected adapter, bound local address, live transfer rates, and received/sent bytes. Filter by application or ID. Up to 256 active/recent connections are displayed; unknown process ownership is labelled explicitly.
 - Activity: local event history with filters.
 - Settings: link eligibility, relative weights, IPv4/IPv6 health, and diagnostics.
 
-The dashboard displays engine counters. It does not invent a combined speed value or claim that one connection is split across links.
+The dashboard displays engine counters. It does not invent a combined speed value or claim that one connection is split across links. Detailed connection diagnostics stay in memory; persistent logs include correlation IDs without process names, payloads, or destination addresses.
 
 ## Supported traffic and limits
 
@@ -133,7 +133,7 @@ This repository is Windows-only. Android, iOS, Linux, macOS, and Docker build sc
 
 Local checks include Go tests, lifecycle tests, go vet, packet-parser fuzzing, Go vulnerability scanning, frontend state tests, production frontend build, dependency audit, Wintun hash/signature verification, and a Windows executable build.
 
-The first `v0.0.1` alpha is an unsigned portable prerelease. Later public releases remain blocked until forced-process recovery, physical link-loss failover, a controlled launcher comparison, and Windows signing secrets are completed.
+The `v0.0.1` and `v0.0.2` alphas are explicitly permitted unsigned portable prereleases. Version 0.0.2 adds application/service connection distribution and correlated diagnostics; its sustained Steam, EA, and Epic comparisons await user testing. Other public releases remain blocked until forced-process recovery, physical link-loss failover, a controlled launcher comparison, and Windows signing secrets are completed. See the [research and implementation record](docs/MULTILINK_RESEARCH_AND_IMPLEMENTATION.md).
 
 ## Independent implementation
 

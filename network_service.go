@@ -51,9 +51,11 @@ type TunnelStatus struct {
 	Transport  engine.TransportStats `json:"transport"`
 	LogDropped uint64                `json:"logDropped"`
 	LogError   string                `json:"logError,omitempty"`
+	Flows      []engine.FlowSnapshot `json:"flows"`
 }
 
 type TunnelLogEntry struct {
+	FlowID        uint64    `json:"flowId,omitempty"`
 	At            time.Time `json:"at"`
 	Level         string    `json:"level"`
 	Category      string    `json:"category"`
@@ -132,7 +134,7 @@ func (s *NetworkService) GetTunnelStatus() TunnelStatus {
 		status.State = "error"
 		status.LastError = startupError
 	}
-	result := TunnelStatus{State: status.State, Since: status.Since, LastError: status.LastError, Transport: status.Transport, LogDropped: status.LogDropped, LogError: status.LogError}
+	result := TunnelStatus{State: status.State, Since: status.Since, LastError: status.LastError, Transport: status.Transport, LogDropped: status.LogDropped, LogError: status.LogError, Flows: status.Flows}
 	result.Links = make([]TunnelLinkStatus, 0, len(status.Links))
 	for _, link := range status.Links {
 		result.Links = append(result.Links, TunnelLinkStatus{
@@ -150,7 +152,8 @@ func (s *NetworkService) GetTunnelLogs() []TunnelLogEntry {
 	result := make([]TunnelLogEntry, 0, len(entries))
 	for _, entry := range entries {
 		result = append(result, TunnelLogEntry{
-			At: entry.At, Level: entry.Level, Category: entry.Category, Message: entry.Message,
+			FlowID: entry.FlowID,
+			At:     entry.At, Level: entry.Level, Category: entry.Category, Message: entry.Message,
 			LinkIndex: entry.LinkIndex, BytesSent: entry.BytesSent, BytesReceived: entry.BytesReceived,
 		})
 	}

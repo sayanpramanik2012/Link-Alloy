@@ -1,5 +1,6 @@
 import type { AdapterSummary, LinkStatus } from "../types";
 import type { TransportStats } from "../types";
+import { NoticesPanel } from "./NoticesPanel";
 
 export type LinkPolicy = { enabled: boolean; weight: number; dirty: boolean };
 
@@ -122,6 +123,7 @@ export function SettingsView({ adapters, links, policies, tunnelState, logPath, 
           <div><span className="support-pending">·</span><span>Existing connections may reconnect when their public route changes</span></div>
         </div>
       </section>
+      {!preview && <NoticesPanel />}
     </div>
   );
 }

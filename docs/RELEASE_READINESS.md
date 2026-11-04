@@ -2,7 +2,7 @@
 
 release-ready: false
 
-The readiness flag blocks signed/stable releases. The tag `v0.0.1` is an explicitly permitted unsigned functional alpha and is published as a portable prerelease only.
+The readiness flag blocks signed/stable releases. The tags `v0.0.1` and `v0.0.2` are explicitly permitted unsigned functional alphas and are published as portable prereleases only. Version 0.0.2 distributes application/service connection cohorts, adds bounded per-flow diagnostics, and provides a standalone EXE with embedded notices. Its real launcher comparison remains pending; publishing an alpha does not satisfy the stable gates below.
 
 The Link Alloy Go engine and dashboard are implemented. Local tests cover stable user-configured allocation, lifecycle cancellation, protected-journal validation, IPv4/IPv6 flow translation, bounded TCP/UDP forwarding, packet parsing fuzzing, and PowerShell route-script parsing. A 15-second elevated code-only smoke confirmed Wintun startup, Windows route selection, eight HTTPS flows across two egress paths, and route/address cleanup on normal stop. Keep releases blocked until these remaining behaviors are verified:
 

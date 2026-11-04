@@ -22,11 +22,29 @@ export type TransportStats = {
   activeUDP?: number;
 };
 
-export type RuntimeStatus = Omit<TunnelStatus, "links" | "transport" | "logDropped" | "logError"> & {
+export type RuntimeStatus = Omit<TunnelStatus, "links" | "transport" | "logDropped" | "logError" | "flows"> & {
   links: LinkStatus[] | null;
   transport?: TransportStats;
 	logDropped?: number;
 	logError?: string;
+	flows?: FlowDiagnostic[] | null;
+};
+
+export type FlowDiagnostic = {
+ id: number;
+ processId: number;
+ processName: string;
+ protocol: string;
+ localPort: number;
+ remotePort: number;
+ linkIndex: number;
+ upstreamLocal: string;
+ state: string;
+ dialMilliseconds: number;
+ bytesSent: number;
+ bytesReceived: number;
+ recvBytesPerSec: number;
+ sendBytesPerSec: number;
 };
 
 export type TrafficSample = {

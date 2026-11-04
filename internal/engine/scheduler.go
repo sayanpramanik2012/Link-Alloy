@@ -43,26 +43,28 @@ type trafficBucket struct {
 type linkState struct {
 	link                 Link
 	active               int
-	deficit              float64
 	bytesSent, bytesRecv uint64
 	buckets              [rateBuckets]trafficBucket
 }
 
-// Scheduler uses explicitly configured weights as a target, then uses the
-// recent byte rate of Link Alloy flows to keep new connections away from a
-// saturated link. This matters for launchers that open several long-lived
-// connections: a connection-count-only scheduler can place a large transfer on
-// one link while the other link is idle. Existing connections remain pinned to
-// their selected link; only new connections can be balanced here.
+// Scheduler spreads new connections within each application/service cohort.
+// Byte counters are telemetry, not capacity estimates. Atomic weighted rotation
+// prevents a burst of opens from all chasing the same apparently idle link.
 type Scheduler struct {
 	mu      sync.Mutex
 	links   map[uint32]*linkState
 	order   []uint32
 	lastTie uint32
+	cohorts map[string]*allocationCohort
+}
+
+type allocationCohort struct {
+	credits map[uint32]float64
+	used    time.Time
 }
 
 func NewScheduler(links []Link) *Scheduler {
-	s := &Scheduler{links: make(map[uint32]*linkState)}
+	s := &Scheduler{links: make(map[uint32]*linkState), cohorts: make(map[string]*allocationCohort)}
 	s.Reconcile(links)
 	return s
 }
@@ -71,6 +73,7 @@ func (s *Scheduler) Reconcile(links []Link) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	present := make(map[uint32]bool)
+	changed := false
 	for _, l := range links {
 		if l.Index == 0 || l.Name == "" {
 			continue
@@ -80,10 +83,12 @@ func (s *Scheduler) Reconcile(links []Link) {
 			l.Weight = 1
 		}
 		if old := s.links[l.Index]; old != nil && old.link.Name == l.Name {
+			changed = changed || old.link.Available != l.Available || old.link.IPv4Available != l.IPv4Available || old.link.IPv6Available != l.IPv6Available
 			l.Weight = old.link.Weight
 			l.Disabled = old.link.Disabled
 			old.link = l
 		} else if old == nil || old.active == 0 {
+			changed = true
 			s.links[l.Index] = &linkState{link: l}
 		} else {
 			old.link.Available = false
@@ -92,6 +97,7 @@ func (s *Scheduler) Reconcile(links []Link) {
 	}
 	for idx, st := range s.links {
 		if !present[idx] {
+			changed = changed || st.link.Available
 			st.link.Available = false
 			st.link.Health = "disconnected"
 			if st.active == 0 {
@@ -104,6 +110,9 @@ func (s *Scheduler) Reconcile(links []Link) {
 		s.order = append(s.order, idx)
 	}
 	sort.Slice(s.order, func(i, j int) bool { return s.order[i] < s.order[j] })
+	if changed {
+		s.cohorts = make(map[string]*allocationCohort)
+	}
 }
 func (s *Scheduler) Configure(index uint32, enabled bool, weight float64) error {
 	if !validWeight(weight) {
@@ -117,6 +126,7 @@ func (s *Scheduler) Configure(index uint32, enabled bool, weight float64) error 
 	}
 	st.link.Disabled = !enabled
 	st.link.Weight = weight
+	s.cohorts = make(map[string]*allocationCohort)
 	return nil
 }
 func (s *Scheduler) Acquire() (*Lease, error) { return s.acquire(nil, nil) }
@@ -127,69 +137,54 @@ func (s *Scheduler) AcquireExcludingForFamily(excluded map[uint32]struct{}, ipv6
 	return s.acquire(excluded, &ipv6)
 }
 func (s *Scheduler) acquire(excluded map[uint32]struct{}, ipv6 *bool) (*Lease, error) {
+	return s.acquireCohort("default", excluded, ipv6)
+}
+
+func (s *Scheduler) acquireCohort(key string, excluded map[uint32]struct{}, ipv6 *bool) (*Lease, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tick := time.Now().UnixNano() / int64(rateBucketDuration)
-	type candidate struct {
-		state       *linkState
-		weight      float64
-		activeShare float64
-		rateShare   float64
-		pressure    float64
+	group := s.cohorts[key]
+	if group == nil {
+		if len(s.cohorts) >= 1024 {
+			var oldest string
+			var at time.Time
+			for k, c := range s.cohorts {
+				if at.IsZero() || c.used.Before(at) {
+					oldest, at = k, c.used
+				}
+			}
+			delete(s.cohorts, oldest)
+		}
+		group = &allocationCohort{credits: make(map[uint32]float64)}
+		s.cohorts[key] = group
 	}
-	candidates := make([]candidate, 0, len(s.order))
+	group.used = time.Now()
 	var chosen *linkState
-	chosenPressure := math.Inf(1)
 	eligibleWeight := 0.0
-	totalRate := 0.0
-	totalActive := 0
 	for _, idx := range s.order {
 		st := s.links[idx]
 		l := st.link
 		if !l.Available || l.Disabled {
+			delete(group.credits, idx)
 			continue
 		}
 		if _, skip := excluded[idx]; skip {
 			continue
 		}
 		if ipv6 != nil && l.FamiliesKnown && ((*ipv6 && !l.IPv6Available) || (!*ipv6 && !l.IPv4Available)) {
+			delete(group.credits, idx)
 			continue
 		}
 		eligibleWeight += l.Weight
-		sent, received := s.sampleAtLocked(st, tick)
-		rate := (float64(sent) + float64(received)) / rateWindow.Seconds()
-		totalRate += rate
-		totalActive += st.active
-		candidates = append(candidates, candidate{state: st, weight: l.Weight, rateShare: rate})
+		group.credits[idx] += l.Weight
+		if chosen == nil || group.credits[idx] > group.credits[chosen.link.Index] || (group.credits[idx] == group.credits[chosen.link.Index] && s.lastTie == chosen.link.Index && idx != s.lastTie) {
+			chosen = st
+		}
 	}
-	if len(candidates) == 0 {
+	if chosen == nil {
 		return nil, ErrNoHealthyLink
 	}
-	// Keep the original deficit scheduler as the deterministic fallback when
-	// there is no recent traffic to balance. Once traffic exists, compare each
-	// link's observed share with its configured target share. The active-flow
-	// share is a small tie-breaker that prevents repeatedly assigning new flows
-	// to the same idle link before its first bytes are reported.
-	for i := range candidates {
-		c := &candidates[i]
-		c.state.deficit += c.weight
-		if totalRate > 0 {
-			c.rateShare = (c.rateShare / totalRate) / (c.weight / eligibleWeight)
-		} else {
-			c.rateShare = 0
-		}
-		if totalActive > 0 {
-			c.activeShare = (float64(c.state.active) / float64(totalActive)) / (c.weight / eligibleWeight)
-		}
-		c.pressure = c.rateShare*0.8 + c.activeShare*0.2
-	}
-	for _, c := range candidates {
-		if chosen == nil || c.pressure < chosenPressure || (c.pressure == chosenPressure && c.state.deficit > chosen.deficit) || (c.pressure == chosenPressure && c.state.deficit == chosen.deficit && s.lastTie == chosen.link.Index && c.state.link.Index != s.lastTie) {
-			chosen = c.state
-			chosenPressure = c.pressure
-		}
-	}
-	chosen.deficit -= eligibleWeight
+	group.credits[chosen.link.Index] -= eligibleWeight
 	chosen.active++
 	s.lastTie = chosen.link.Index
 	return &Lease{scheduler: s, index: chosen.link.Index, state: chosen}, nil
@@ -214,12 +209,16 @@ func (s *Scheduler) SetAvailable(index uint32, available bool) bool {
 		return false
 	}
 	st.link.Available = available
+	s.cohorts = make(map[string]*allocationCohort)
 	return true
 }
 func (s *Scheduler) SetHealth(index uint32, v4, v6 bool, health, detail string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if st := s.links[index]; st != nil {
+		if st.link.IPv4Available != v4 || st.link.IPv6Available != v6 {
+			s.cohorts = make(map[string]*allocationCohort)
+		}
 		st.link.Available = v4 || v6
 		st.link.IPv4Available = v4
 		st.link.IPv6Available = v6
@@ -253,10 +252,12 @@ func (s *Scheduler) snapshotsAt(now time.Time) []LinkSnapshot {
 }
 
 type Lease struct {
-	scheduler *Scheduler
-	index     uint32
-	state     *linkState
-	once      sync.Once
+	scheduler   *Scheduler
+	index       uint32
+	state       *linkState
+	once        sync.Once
+	flowID      uint64
+	diagnostics *flowRegistry
 }
 
 func (l *Lease) LinkIndex() uint32 { return l.index }
@@ -265,7 +266,12 @@ func (l *Lease) Link() Link {
 	defer l.scheduler.mu.Unlock()
 	return l.state.link
 }
-func (l *Lease) Report(sent, received uint64) { l.reportAt(time.Now(), sent, received) }
+func (l *Lease) Report(sent, received uint64) {
+	l.reportAt(time.Now(), sent, received)
+	if l.diagnostics != nil {
+		l.diagnostics.report(l.flowID, sent, received)
+	}
+}
 func (l *Lease) reportAt(now time.Time, sent, received uint64) {
 	if sent == 0 && received == 0 {
 		return
@@ -285,6 +291,9 @@ func (l *Lease) reportAt(now time.Time, sent, received uint64) {
 }
 func (l *Lease) Release() {
 	l.once.Do(func() {
+		if l.diagnostics != nil {
+			l.diagnostics.end(l.flowID, "completed")
+		}
 		l.scheduler.mu.Lock()
 		defer l.scheduler.mu.Unlock()
 		if l.state.active > 0 {

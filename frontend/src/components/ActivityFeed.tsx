@@ -58,7 +58,7 @@ export function ActivityFeed({ entries, compact = false, path }: Props) {
             <li className={`log-entry log-${entry.level}`} key={`${entry.at}-${entry.category}-${index}`}>
               <time dateTime={entry.at} title={new Date(entry.at).toLocaleString()}>{formatTime(entry.at)}</time>
               <span className="log-level">{entry.level}</span>
-              <span className="log-message" title={entry.message}>{entry.message}</span>
+              <span className="log-message" title={entry.message}>{entry.flowId ? `#${entry.flowId} · ` : ""}{entry.message}</span>
               {trafficSummary(entry) && <span className="log-traffic">{trafficSummary(entry)}</span>}
             </li>
           ))}

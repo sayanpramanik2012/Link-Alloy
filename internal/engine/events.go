@@ -3,6 +3,7 @@ package engine
 import "time"
 
 type EngineEvent struct {
+	FlowID        uint64    `json:"flowId,omitempty"`
 	At            time.Time `json:"at"`
 	Level         string    `json:"level"`
 	Category      string    `json:"category"`

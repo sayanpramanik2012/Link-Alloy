@@ -286,7 +286,7 @@ function App() {
               logPath={logPath}
             />
           )}
-          {view === "connections" && <ConnectionsView adapters={adapters} links={links} active={tunnelActive} transport={status.transport} preview={previewMode} />}
+          {view === "connections" && <ConnectionsView adapters={adapters} links={links} active={tunnelActive} transport={status.transport} flows={status.flows} preview={previewMode} />}
           {view === "activity" && <ActivityFeed entries={logs} path={logPath} />}
           {view === "settings" && (
             <SettingsView
@@ -399,7 +399,7 @@ function OverviewView(props: {
         <section className="panel operating-panel">
           <p className="eyebrow">OPERATING MODEL</p>
           <h2>One link per connection</h2>
-          <p>New flows use an eligible network and prefer the less-loaded healthy link. A single connection is not split across adapters, and active sessions may reconnect if their link drops.</p>
+          <p>New connections are spread across eligible links within each application and service. A single connection stays on its assigned adapter. Open Connections to inspect actual traffic.</p>
           <div className="operating-protocols"><span>IPv4 + IPv6</span><span>TCP + UDP</span></div>
         </section>
       </aside>

@@ -23,6 +23,7 @@ type RuntimeStatus struct {
 	Transport  TransportStats `json:"transport"`
 	LogDropped uint64         `json:"logDropped"`
 	LogError   string         `json:"logError,omitempty"`
+	Flows      []FlowSnapshot `json:"flows"`
 }
 type tunnelForwarder interface {
 	RunTunnel(context.Context, TunnelDevice) error
@@ -194,6 +195,9 @@ func (c *TunnelController) Status() RuntimeStatus {
 	if s != nil {
 		st.Links = s.scheduler.Snapshots()
 		st.Transport = s.forwarder.Stats()
+		if source, ok := s.forwarder.(interface{ FlowSnapshots() []FlowSnapshot }); ok {
+			st.Flows = source.FlowSnapshots()
+		}
 	} else {
 		ifs, e := UpstreamInterfaces()
 		if e == nil {

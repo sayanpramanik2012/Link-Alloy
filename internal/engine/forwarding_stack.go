@@ -84,6 +84,8 @@ type ForwardingStack struct {
 	capacityDrops     atomic.Uint64
 	backpressureDrops atomic.Uint64
 	sinkMu            sync.RWMutex
+	owners            ownerResolver
+	diagnostics       flowRegistry
 }
 
 func NewForwardingStack(virtualIPv4, virtualIPv6 netip.Addr, flows *FlowTable, scheduler *Scheduler, dial UpstreamDialer) (*ForwardingStack, error) {
@@ -325,6 +327,8 @@ func (e *ForwardingStack) Stats() TransportStats {
 	return TransportStats{CapturedPackets: e.capturedPackets.Load(), ReplyPackets: e.replyPackets.Load(), UnsupportedDrops: e.unsupportedDrops.Load(), UnknownFlowDrops: e.unknownFlowDrops.Load(), CapacityDrops: e.capacityDrops.Load(), BackpressureDrops: e.backpressureDrops.Load(), ActiveTCP: tcpCount, ActiveUDP: udpCount}
 }
 
+func (e *ForwardingStack) FlowSnapshots() []FlowSnapshot { return e.diagnostics.snapshots() }
+
 func (e *ForwardingStack) beginFlow(protocol uint8) bool {
 	e.workMu.Lock()
 	defer e.workMu.Unlock()
@@ -452,6 +456,9 @@ func requestMatchesFlow(remoteAddress tcpip.Address, remotePort uint16, flow Flo
 }
 
 func (e *ForwardingStack) openUpstream(flow Flow, transport string) (net.Conn, *Lease, error) {
+	owner := e.owners.resolve(flow)
+	id := e.diagnostics.begin(flow, owner, transport)
+	cohort := cohortFor(flow, owner)
 	excluded := make(map[uint32]struct{})
 	var lastErr error
 	address := net.JoinHostPort(flow.Key.Destination.String(), strconv.Itoa(int(flow.Key.DestinationPort)))
@@ -461,7 +468,8 @@ func (e *ForwardingStack) openUpstream(flow Flow, transport string) (net.Conn, *
 		transport += "4"
 	}
 	for attempts := 0; attempts < len(e.scheduler.Snapshots()); attempts++ {
-		lease, err := e.scheduler.AcquireExcludingForFamily(excluded, flow.Key.Destination.Is6())
+		ipv6 := flow.Key.Destination.Is6()
+		lease, err := e.scheduler.acquireCohort(cohort, excluded, &ipv6)
 		if err != nil {
 			break
 		}
@@ -470,13 +478,15 @@ func (e *ForwardingStack) openUpstream(flow Flow, transport string) (net.Conn, *
 		connection, dialErr := e.dial(ctx, link.Index, transport, address)
 		cancel()
 		if dialErr == nil {
+			e.diagnostics.connected(id, link.Index, connection)
+			lease.flowID, lease.diagnostics = id, &e.diagnostics
 			if strings.HasPrefix(transport, "tcp") {
-				e.emit(EngineEvent{Level: "info", Category: "flow-start", Message: "TCP flow assigned to " + link.Name, LinkIndex: link.Index})
+				e.emit(EngineEvent{FlowID: id, Level: "info", Category: "flow-start", Message: "TCP flow assigned to " + link.Name, LinkIndex: link.Index})
 			}
 			return connection, lease, nil
 		}
 		if strings.HasPrefix(transport, "tcp") {
-			e.emit(EngineEvent{Level: "warning", Category: "link-dial-failed", Message: "TCP connection failed on " + link.Name + "; trying another available link", LinkIndex: link.Index})
+			e.emit(EngineEvent{FlowID: id, Level: "warning", Category: "link-dial-failed", Message: "TCP connection failed on " + link.Name + "; trying another available link", LinkIndex: link.Index})
 		}
 		lastErr = dialErr
 		excluded[link.Index] = struct{}{}
@@ -485,6 +495,7 @@ func (e *ForwardingStack) openUpstream(flow Flow, transport string) (net.Conn, *
 	if lastErr == nil {
 		lastErr = ErrNoHealthyLink
 	}
+	e.diagnostics.end(id, "dial failed")
 	return nil, nil, lastErr
 }
 
@@ -493,7 +504,37 @@ func dialOnInterface(ctx context.Context, interfaceIndex uint32, network, addres
 	if err != nil {
 		return nil, err
 	}
-	return dialer.DialContext(ctx, network, address)
+	conn, err := dialer.DialContext(ctx, network, address)
+	if err != nil {
+		return nil, err
+	}
+	if err := verifyUpstreamInterface(conn, interfaceIndex); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+func verifyUpstreamInterface(conn net.Conn, index uint32) error {
+	iface, err := net.InterfaceByIndex(int(index))
+	if err != nil {
+		return err
+	}
+	addresses, err := iface.Addrs()
+	if err != nil {
+		return err
+	}
+	local, err := netip.ParseAddrPort(conn.LocalAddr().String())
+	if err != nil {
+		return errors.New("upstream local address could not be verified")
+	}
+	for _, address := range addresses {
+		prefix, err := netip.ParsePrefix(address.String())
+		if err == nil && prefix.Addr().Unmap().WithZone("") == local.Addr().Unmap().WithZone("") {
+			return nil
+		}
+	}
+	return errors.New("upstream socket did not bind to the selected interface")
 }
 
 func (e *ForwardingStack) bridgeTCP(flow Flow, application, upstream net.Conn, lease *Lease) {
@@ -551,7 +592,7 @@ func (e *ForwardingStack) bridgeTCP(flow Flow, application, upstream net.Conn, l
 	}
 	bytesSent := first.sent + second.sent
 	bytesReceived := first.recv + second.recv
-	e.emit(EngineEvent{Level: "info", Category: "flow-end", Message: "TCP flow ended", LinkIndex: lease.LinkIndex(), BytesSent: bytesSent, BytesReceived: bytesReceived})
+	e.emit(EngineEvent{FlowID: lease.flowID, Level: "info", Category: "flow-end", Message: "TCP flow ended", LinkIndex: lease.LinkIndex(), BytesSent: bytesSent, BytesReceived: bytesReceived})
 }
 
 func (e *ForwardingStack) bridgeUDP(flow Flow, application *gonet.UDPConn, upstream net.Conn, lease *Lease) {
@@ -618,7 +659,7 @@ func (e *ForwardingStack) bridgeUDP(flow Flow, application *gonet.UDPConn, upstr
 	<-results
 	sent, received := sentTotal.Load(), receivedTotal.Load()
 	if sent+received >= 64*1024 {
-		e.emit(EngineEvent{Level: "info", Category: "flow-end", Message: "Large UDP flow ended", LinkIndex: lease.LinkIndex(), BytesSent: sent, BytesReceived: received})
+		e.emit(EngineEvent{FlowID: lease.flowID, Level: "info", Category: "flow-end", Message: "Large UDP flow ended", LinkIndex: lease.LinkIndex(), BytesSent: sent, BytesReceived: received})
 	}
 }
 

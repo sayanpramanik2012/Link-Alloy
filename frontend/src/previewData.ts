@@ -34,6 +34,7 @@ export function buildPreviewSnapshot(): { status: RuntimeStatus; logs: TunnelLog
       links,
       transport: { capturedPackets: 184_220, replyPackets: 179_874, activeTCP: 11, activeUDP: 4, unsupportedDrops: 0, capacityDrops: 0, backpressureDrops: 0, unknownFlowDrops: 0 },
       logDropped: 0,
+      flows: links.map((link, index) => ({ id: index + 1, processId: 1234, processName: "Sample downloader", protocol: "tcp", localPort: 50000 + index, remotePort: 443, linkIndex: link.index, upstreamLocal: `192.0.2.${index + 1}:51000`, state: "active", dialMilliseconds: 24 + index * 10, bytesSent: link.bytesSent, bytesReceived: link.bytesReceived, recvBytesPerSec: link.recvBytesPerSec, sendBytesPerSec: link.sendBytesPerSec })),
     },
     logs,
     logPath: "%ProgramData%\\Link Alloy\\logs\\engine.jsonl",
