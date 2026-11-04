@@ -72,6 +72,9 @@ jobs:
       - name: Fuzz packet parsing without changing routes
         run: go test -mod=mod ./internal/engine -run '^$' -fuzz '^FuzzFlowTablePacketParsing$' -fuzztime=10s -parallel=2
 
+      - name: Fuzz TLS service inspection without changing routes
+        run: go test -mod=mod ./internal/engine -run '^$' -fuzz '^FuzzTLSServiceInspection$' -fuzztime=10s -parallel=2
+
       - name: Build Windows preview
         shell: pwsh
         run: |

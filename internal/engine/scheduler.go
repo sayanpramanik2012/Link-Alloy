@@ -59,8 +59,9 @@ type Scheduler struct {
 }
 
 type allocationCohort struct {
-	credits map[uint32]float64
-	used    time.Time
+	credits  map[uint32]float64
+	eligible map[uint32]float64
+	used     time.Time
 }
 
 func NewScheduler(links []Link) *Scheduler {
@@ -73,7 +74,6 @@ func (s *Scheduler) Reconcile(links []Link) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	present := make(map[uint32]bool)
-	changed := false
 	for _, l := range links {
 		if l.Index == 0 || l.Name == "" {
 			continue
@@ -83,12 +83,10 @@ func (s *Scheduler) Reconcile(links []Link) {
 			l.Weight = 1
 		}
 		if old := s.links[l.Index]; old != nil && old.link.Name == l.Name {
-			changed = changed || old.link.Available != l.Available || old.link.IPv4Available != l.IPv4Available || old.link.IPv6Available != l.IPv6Available
 			l.Weight = old.link.Weight
 			l.Disabled = old.link.Disabled
 			old.link = l
 		} else if old == nil || old.active == 0 {
-			changed = true
 			s.links[l.Index] = &linkState{link: l}
 		} else {
 			old.link.Available = false
@@ -97,7 +95,6 @@ func (s *Scheduler) Reconcile(links []Link) {
 	}
 	for idx, st := range s.links {
 		if !present[idx] {
-			changed = changed || st.link.Available
 			st.link.Available = false
 			st.link.Health = "disconnected"
 			if st.active == 0 {
@@ -110,9 +107,6 @@ func (s *Scheduler) Reconcile(links []Link) {
 		s.order = append(s.order, idx)
 	}
 	sort.Slice(s.order, func(i, j int) bool { return s.order[i] < s.order[j] })
-	if changed {
-		s.cohorts = make(map[string]*allocationCohort)
-	}
 }
 func (s *Scheduler) Configure(index uint32, enabled bool, weight float64) error {
 	if !validWeight(weight) {
@@ -126,7 +120,6 @@ func (s *Scheduler) Configure(index uint32, enabled bool, weight float64) error 
 	}
 	st.link.Disabled = !enabled
 	st.link.Weight = weight
-	s.cohorts = make(map[string]*allocationCohort)
 	return nil
 }
 func (s *Scheduler) Acquire() (*Lease, error) { return s.acquire(nil, nil) }
@@ -161,21 +154,39 @@ func (s *Scheduler) acquireCohort(key string, excluded map[uint32]struct{}, ipv6
 	group.used = time.Now()
 	var chosen *linkState
 	eligibleWeight := 0.0
+	eligible := make(map[uint32]float64)
+	candidates := make([]*linkState, 0, len(s.order))
 	for _, idx := range s.order {
 		st := s.links[idx]
 		l := st.link
 		if !l.Available || l.Disabled {
-			delete(group.credits, idx)
 			continue
 		}
 		if _, skip := excluded[idx]; skip {
 			continue
 		}
 		if ipv6 != nil && l.FamiliesKnown && ((*ipv6 && !l.IPv6Available) || (!*ipv6 && !l.IPv4Available)) {
-			delete(group.credits, idx)
 			continue
 		}
 		eligibleWeight += l.Weight
+		eligible[idx] = l.Weight
+		candidates = append(candidates, st)
+	}
+	// Preserve this group's rotation unless its own eligible adapter set or
+	// weights changed. IPv6-only probe changes cannot reset IPv4 allocations.
+	changed := len(eligible) != len(group.eligible)
+	for idx, weight := range eligible {
+		if group.eligible[idx] != weight {
+			changed = true
+			break
+		}
+	}
+	if changed {
+		group.credits = make(map[uint32]float64)
+		group.eligible = eligible
+	}
+	for _, st := range candidates {
+		idx, l := st.link.Index, st.link
 		group.credits[idx] += l.Weight
 		if chosen == nil || group.credits[idx] > group.credits[chosen.link.Index] || (group.credits[idx] == group.credits[chosen.link.Index] && s.lastTie == chosen.link.Index && idx != s.lastTie) {
 			chosen = st
@@ -209,16 +220,12 @@ func (s *Scheduler) SetAvailable(index uint32, available bool) bool {
 		return false
 	}
 	st.link.Available = available
-	s.cohorts = make(map[string]*allocationCohort)
 	return true
 }
 func (s *Scheduler) SetHealth(index uint32, v4, v6 bool, health, detail string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if st := s.links[index]; st != nil {
-		if st.link.IPv4Available != v4 || st.link.IPv6Available != v6 {
-			s.cohorts = make(map[string]*allocationCohort)
-		}
 		st.link.Available = v4 || v6
 		st.link.IPv4Available = v4
 		st.link.IPv6Available = v6

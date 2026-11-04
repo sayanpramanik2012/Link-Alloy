@@ -133,10 +133,14 @@ func parseTCPOwners(data []byte, ipv6 bool) map[FlowKey]uint32 {
 	return out
 }
 
-func cohortFor(flow Flow, owner flowOwner) string {
+func cohortFor(flow Flow, owner flowOwner, service ...string) string {
 	identity := owner.Instance
 	if identity == "" {
 		identity = "unknown"
 	}
-	return fmt.Sprintf("%s:%d:%d:%t", identity, flow.Key.Protocol, flow.Key.DestinationPort, flow.Key.Destination.Is6())
+	name := "unclassified"
+	if len(service) > 0 && service[0] != "" {
+		name = service[0]
+	}
+	return fmt.Sprintf("%s:%d:%d:%t:%s", identity, flow.Key.Protocol, flow.Key.DestinationPort, flow.Key.Destination.Is6(), name)
 }

@@ -1,5 +1,6 @@
 import { formatRate } from "../format";
 import type { TrafficSample } from "../types";
+import { useRateUnit } from "../rate-unit";
 
 type Props = {
   samples: TrafficSample[];
@@ -17,8 +18,9 @@ function pathFor(samples: TrafficSample[], key: "download" | "upload", maximum: 
   if (samples.length < 2) return "";
   const plotWidth = width - inset * 2;
   const plotHeight = height - inset * 2;
+  const windowStart = samples[samples.length - 1].at - 60_000;
   return samples.map((sample, index) => {
-    const x = inset + (index / (samples.length - 1)) * plotWidth;
+    const x = inset + Math.max(0, Math.min(1, (sample.at - windowStart) / 60_000)) * plotWidth;
     const y = height - inset - (Math.max(0, sample[key]) / maximum) * plotHeight;
     return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
@@ -33,6 +35,7 @@ function areaFor(line: string) {
 }
 
 export function ThroughputChart({ samples, download, upload, loading, preview = false }: Props) {
+  const { unit } = useRateUnit();
   const maximum = Math.max(1, ...samples.flatMap((sample) => [sample.download, sample.upload]));
   const downloadPath = pathFor(samples, "download", maximum);
   const uploadPath = pathFor(samples, "upload", maximum);
@@ -50,19 +53,20 @@ export function ThroughputChart({ samples, download, upload, loading, preview = 
         </span>
       </div>
 
-      <div className="throughput-current" aria-live="polite">
+      <div className="throughput-current">
         <div className="throughput-value throughput-download">
           <span className="metric-label"><i aria-hidden="true" /> Download</span>
-          <strong>{formatRate(download)}</strong>
+          <strong>{formatRate(download, unit)}</strong>
         </div>
         <div className="throughput-value throughput-upload">
           <span className="metric-label"><i aria-hidden="true" /> Upload</span>
-          <strong>{formatRate(upload)}</strong>
+          <strong>{formatRate(upload, unit)}</strong>
         </div>
         <span className="chart-window">Rolling 60 seconds</span>
       </div>
 
       <div className="chart-wrap">
+        <div className="chart-scale" aria-hidden="true"><span>{formatRate(maximum, unit)}</span><span>{formatRate(maximum / 2, unit)}</span><span>0</span></div>
         {enoughSamples ? (
           <svg className="throughput-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={preview ? "Sample combined upload and download rates for layout preview, not live" : "Combined upload and download rates sampled from Link Alloy link counters"}>
             <title>{preview ? "Sample throughput values for visual layout review" : "Combined throughput from real per-link byte counters"}</title>
@@ -81,6 +85,7 @@ export function ThroughputChart({ samples, download, upload, loading, preview = 
           </div>
         )}
       </div>
+      <div className="chart-timeline" aria-hidden="true"><span>60 seconds ago</span><span>Now</span></div>
 
       <div className="chart-legend" aria-hidden="true">
         <span className="legend-download"><i />Download</span>

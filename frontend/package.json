@@ -1,15 +1,15 @@
 {
   "name": "link-alloy",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "packageManager": "pnpm@10.34.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build:dev": "tsc && vite build --minify false --mode development",
     "build": "tsc && vite build --mode production",
-    "test": "pnpm run test:compile && node --test test/state-utils.test.mjs",
-    "test:compile": "tsc src/state-utils.ts --target ES2020 --module ES2020 --moduleResolution Bundler --skipLibCheck --lib ES2020,DOM --strict --outDir .test-dist",
+    "test": "pnpm run test:compile && node --test test/state-utils.test.mjs test/format.test.mjs",
+    "test:compile": "tsc src/state-utils.ts src/format.ts --target ES2020 --module ES2020 --moduleResolution Bundler --skipLibCheck --lib ES2020,DOM --strict --outDir .test-dist",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -7,7 +7,7 @@ info:
   description: "Independent Windows multi-link networking client"
   copyright: "Copyright 2026 Sayan Pramanik"
   comments: "Windows system tunnel for connection-level multi-link routing"
-  version: "0.0.2"
+  version: "0.0.3"
 
 dev_mode:
   root_path: .

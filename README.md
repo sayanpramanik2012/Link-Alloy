@@ -34,7 +34,9 @@ It addresses a practical problem: a Windows PC can have multiple independent int
 
 ## What it does
 
-Link Alloy captures supported routed traffic through a Windows tunnel, assigns each new TCP or UDP connection to a healthy link, and binds the upstream socket to that adapter. Version 0.0.2 rotates new connections within application/service groups using configured weights, so background traffic does not dictate every new download path. The dashboard shows link health, active connections, throughput, totals, diagnostics, and recent activity.
+Link Alloy captures supported routed traffic through a Windows tunnel, assigns each new TCP or UDP connection to a healthy link, and binds the upstream socket to that adapter. Version 0.0.3 separates supported TLS services within each application and preserves allocation history across unrelated IP-family health changes. The dashboard shows link health, active connections, throughput, totals, service diagnostics, and recent activity.
+
+**Performance status:** 0.0.3 is an experimental alpha and has not passed the combined-throughput comparison. Short samples measured direct Ethernet at 94–124 Mbps, Wi-Fi at 30–31 Mbps, and a timed transfer through the tunnel at about 87 Mbps. These sequential samples do not establish a speed gain; investigation continues. See the [measurement record](docs/DOWNLOAD_DIAGNOSIS_2026-11-04.md).
 
 Link Alloy is connection-level scheduling:
 
@@ -61,7 +63,7 @@ Run it as administrator.
 5. Return to Overview and press Start tunnel.
 6. Wait for the links to show their health state.
 7. Start or resume the launcher download.
-8. If the launcher was already downloading, close and reopen it or pause/resume it to create fresh connections.
+8. For a routing comparison, fully exit and reopen the launcher to create fresh connections. A short pause/resume can reuse existing HTTP/2 connections and retain their old link assignments.
 9. Stop the tunnel from Link Alloy before closing the app.
 
 Do not run two Link Alloy windows at the same time. A Windows session lock prevents a second process from changing a live session.
@@ -133,7 +135,7 @@ This repository is Windows-only. Android, iOS, Linux, macOS, and Docker build sc
 
 Local checks include Go tests, lifecycle tests, go vet, packet-parser fuzzing, Go vulnerability scanning, frontend state tests, production frontend build, dependency audit, Wintun hash/signature verification, and a Windows executable build.
 
-The `v0.0.1` and `v0.0.2` alphas are explicitly permitted unsigned portable prereleases. Version 0.0.2 adds application/service connection distribution and correlated diagnostics; its sustained Steam, EA, and Epic comparisons await user testing. Other public releases remain blocked until forced-process recovery, physical link-loss failover, a controlled launcher comparison, and Windows signing secrets are completed. See the [research and implementation record](docs/MULTILINK_RESEARCH_AND_IMPLEMENTATION.md).
+The `v0.0.1`, `v0.0.2`, and `v0.0.3` alphas are explicitly permitted unsigned portable prereleases. The user approved 0.0.3 for further testing with the performance limitation documented. Other public releases remain blocked until forced-process recovery, physical link-loss failover, a successful controlled launcher comparison, and Windows signing secrets are completed. See the [research and implementation record](docs/MULTILINK_RESEARCH_AND_IMPLEMENTATION.md).
 
 ## Independent implementation
 

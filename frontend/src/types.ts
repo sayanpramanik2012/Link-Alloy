@@ -34,6 +34,7 @@ export type FlowDiagnostic = {
  id: number;
  processId: number;
  processName: string;
+ serviceName?: string;
  protocol: string;
  localPort: number;
  remotePort: number;

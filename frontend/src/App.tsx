@@ -8,9 +8,11 @@ import { LinkCard } from "./components/LinkCard";
 import { ConnectionsView } from "./components/ConnectionsView";
 import { ActivityFeed } from "./components/ActivityFeed";
 import { SettingsView } from "./components/SettingsView";
-import { formatBytes, formatDurationSince, formatRate } from "./format";
+import { formatBytes, formatDurationSince } from "./format";
 import { buildPreviewSnapshot, previewAdapters } from "./previewData";
 import { appendRollingSample, errorReducer, isStale, pollInterval, withTimeout } from "./state-utils";
+import { RateUnitControl } from "./rate-unit";
+import { Icon } from "./components/Icon";
 
 const views: Record<AppView, { title: string; eyebrow: string; description: string }> = {
   overview: { title: "Overview", eyebrow: "NETWORK CONTROL", description: "See which links are carrying your traffic and how the tunnel is behaving." },
@@ -251,9 +253,7 @@ function App() {
               <h1>{pageTitle}</h1>
               <p className="page-description">{viewInfo.description}</p>
             </div>
-            <button className="icon-button refresh-action" type="button" onClick={() => void refreshSnapshot(true)} disabled={refreshing} aria-label="Refresh network status" title="Refresh status">
-              <span className={refreshing ? "refresh-icon spinning" : "refresh-icon"} aria-hidden="true">↻</span>
-            </button>
+            <div className="page-actions"><RateUnitControl /><button className="icon-button refresh-action" type="button" onClick={() => void refreshSnapshot(true)} disabled={refreshing} aria-label="Refresh network status" title="Refresh status"><Icon name="refresh" /></button></div>
           </section>
 
           {previewMode && <div className="preview-banner" role="note"><strong>Visual preview</strong><span>Sample values only · not live telemetry · controls are disabled · no network routes are changed</span></div>}
@@ -337,7 +337,7 @@ function OverviewView(props: {
   logPath: string;
 }) {
   const byIndex = new Map(props.links.map((link) => [link.index, link]));
-  const stateText = props.preview ? "Dashboard layout preview" : props.busy ? "Updating routes" : props.active ? "Your traffic is flowing" : props.status.state === "error" ? "The tunnel needs attention" : "System routing is paused";
+  const stateText = props.preview ? "Dashboard layout preview" : props.busy ? "Updating routes" : props.active ? "Network routing is on" : props.status.state === "error" ? "The tunnel needs attention" : "System routing is paused";
   const stateHelp = props.preview
     ? "Example values are shown to review the layout. No Windows routes are installed and no network traffic is being measured."
     : props.busy
@@ -348,18 +348,17 @@ function OverviewView(props: {
         ? "Review the error above and the activity log before retrying."
         : "Start the tunnel to route supported traffic from Windows applications across eligible links.";
   const currentLinkCount = props.active ? props.usableLinks : props.connectedInterfaces;
-  const currentLinkLabel = props.active ? "healthy links" : "interfaces up";
+  const currentLinkLabel = props.active ? "available for new flows" : "interfaces up";
 
   return (
     <div className="overview-layout">
-      <div className="overview-main-column">
         <section className={`tunnel-hero ${props.active ? "tunnel-hero-active" : ""}`} aria-labelledby="tunnel-status-title" aria-busy={props.busy}>
           <div className="tunnel-hero-copy">
             <div className="tunnel-state-line"><span className={`state-marker ${props.active ? "state-marker-active" : ""}`} /><span>{props.preview ? "VISUAL PREVIEW" : props.active ? "TUNNEL ACTIVE" : props.busy ? "IN PROGRESS" : props.status.state === "error" ? "ACTION REQUIRED" : "READY"}</span></div>
             <h2 id="tunnel-status-title">{stateText}</h2>
             <p>{stateHelp}</p>
             <button className={`primary-button ${props.active ? "primary-button-stop" : "primary-button-start"}`} type="button" onClick={props.onToggle} disabled={props.preview || props.busy || props.initialLoading} aria-label={props.preview ? "Tunnel controls are disabled in visual preview" : props.active ? "Stop Link Alloy tunnel" : "Start Link Alloy tunnel"}>
-              <span className="button-dot" aria-hidden="true" />{props.preview ? "Preview only" : props.busy ? "Please wait…" : props.active ? "Stop tunnel" : "Start tunnel"}
+              <Icon name="power" />{props.preview ? "Preview only" : props.busy ? "Please wait…" : props.active ? "Stop tunnel" : "Start tunnel"}
             </button>
             {!props.active && !props.preview && <span className="hero-permission">Administrator access is required to install system routes.</span>}
           </div>
@@ -370,13 +369,17 @@ function OverviewView(props: {
           </div>
         </section>
 
+      <div className="overview-main-column">
         <div className="overview-metric-grid">
-          <div className="overview-metric"><span className="metric-label metric-download"><i aria-hidden="true" />Download</span><strong>{formatRate(props.downloadRate)}</strong><small>{props.active ? `${formatBytes(props.totalReceived)} received this session` : "No active tunnel traffic"}</small></div>
-          <div className="overview-metric"><span className="metric-label metric-upload"><i aria-hidden="true" />Upload</span><strong>{formatRate(props.uploadRate)}</strong><small>{props.active ? `${formatBytes(props.totalSent)} sent this session` : "No active tunnel traffic"}</small></div>
+          <div className="overview-metric"><span className="metric-label">Downloaded this session</span><strong>{formatBytes(props.totalReceived)}</strong><small>Across participating links</small></div>
+          <div className="overview-metric"><span className="metric-label">Uploaded this session</span><strong>{formatBytes(props.totalSent)}</strong><small>Across participating links</small></div>
         </div>
 
         <ThroughputChart samples={props.history} download={props.downloadRate} upload={props.uploadRate} loading={props.busy} preview={props.preview} />
+        <ActivityFeed entries={props.logs} compact path={props.logPath} />
+      </div>
 
+      <aside className="overview-rail">
         <section className="panel network-panel" aria-labelledby="network-links-title">
           <div className="panel-header">
             <div><p className="eyebrow">AVAILABLE PATHS</p><h2 id="network-links-title">Network links</h2></div>
@@ -388,14 +391,11 @@ function OverviewView(props: {
             <div className="empty-panel"><strong>No network links detected</strong><p>Connect Ethernet, Wi-Fi, or a tethered device and refresh.</p></div>
           ) : (
             <div className="link-card-list">
-              {props.adapters.map((adapter) => <LinkCard key={adapter.index} adapter={adapter} link={byIndex.get(adapter.index)} tunnelActive={props.active} />)}
+              {props.adapters.map((adapter) => <LinkCard key={adapter.index} adapter={adapter} link={byIndex.get(adapter.index)} tunnelActive={props.active} downloadShare={props.downloadRate > 0 ? (byIndex.get(adapter.index)?.recvBytesPerSec ?? 0) / props.downloadRate * 100 : 0} />)}
             </div>
           )}
           <p className="section-footnote">Traffic totals include Link Alloy flows only. Link health is measured by an egress check.</p>
         </section>
-      </div>
-      <aside className="overview-rail">
-        <ActivityFeed entries={props.logs} compact path={props.logPath} />
         <section className="panel operating-panel">
           <p className="eyebrow">OPERATING MODEL</p>
           <h2>One link per connection</h2>

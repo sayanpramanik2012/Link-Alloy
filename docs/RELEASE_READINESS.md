@@ -2,7 +2,9 @@
 
 release-ready: false
 
-The readiness flag blocks signed/stable releases. The tags `v0.0.1` and `v0.0.2` are explicitly permitted unsigned functional alphas and are published as portable prereleases only. Version 0.0.2 distributes application/service connection cohorts, adds bounded per-flow diagnostics, and provides a standalone EXE with embedded notices. Its real launcher comparison remains pending; publishing an alpha does not satisfy the stable gates below.
+The readiness flag blocks signed/stable releases. The tags `v0.0.1`, `v0.0.2`, and `v0.0.3` are explicitly permitted unsigned alphas and are published as portable prereleases only. Version 0.0.3 adds TLS service grouping, family-specific allocation stability, improved UI, and bounded diagnostic tools. The user explicitly approved its publication after the performance comparison failed acceptance. Publication does not satisfy the stable gates below.
+
+Observed 4 November short samples: direct Ethernet 94–124 Mbps; direct Wi-Fi 30–31 Mbps; corrected timed test through the tunnel about 87 Mbps; Steam before pausing about 105–109 Mbps. These are sequential samples with variable network conditions, not a proven combined-speed increase or a conclusive measurement of engine overhead. The post-resume comparison was interrupted and remains incomplete. See [diagnosis and measurement record](DOWNLOAD_DIAGNOSIS_2026-11-04.md).
 
 The Link Alloy Go engine and dashboard are implemented. Local tests cover stable user-configured allocation, lifecycle cancellation, protected-journal validation, IPv4/IPv6 flow translation, bounded TCP/UDP forwarding, packet parsing fuzzing, and PowerShell route-script parsing. A 15-second elevated code-only smoke confirmed Wintun startup, Windows route selection, eight HTTPS flows across two egress paths, and route/address cleanup on normal stop. Keep releases blocked until these remaining behaviors are verified:
 

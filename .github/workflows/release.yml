@@ -16,7 +16,7 @@ jobs:
   release:
     runs-on: windows-2025
     env:
-      UNSIGNED_ALPHA: ${{ github.ref_name == 'v0.0.1' || github.ref_name == 'v0.0.2' }}
+      UNSIGNED_ALPHA: ${{ github.ref_name == 'v0.0.1' || github.ref_name == 'v0.0.2' || github.ref_name == 'v0.0.3' }}
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -92,6 +92,9 @@ jobs:
 
       - name: Fuzz packet parsing without changing routes
         run: go test -mod=mod ./internal/engine -run '^$' -fuzz '^FuzzFlowTablePacketParsing$' -fuzztime=10s -parallel=2
+
+      - name: Fuzz TLS service inspection without changing routes
+        run: go test -mod=mod ./internal/engine -run '^$' -fuzz '^FuzzTLSServiceInspection$' -fuzztime=10s -parallel=2
 
       - name: Load required signing certificate
         if: ${{ env.UNSIGNED_ALPHA != 'true' }}

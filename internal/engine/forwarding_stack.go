@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -396,23 +397,53 @@ func (e *ForwardingStack) handleTCP(request *tcp.ForwarderRequest) {
 		}
 	}()
 	e.flows.MarkManaged(flow.Key)
-	upstream, lease, err := e.openUpstream(flow, "tcp")
-	if err != nil {
+	eligible := false
+	for _, l := range e.scheduler.Snapshots() {
+		familyOK := !l.FamiliesKnown || (flow.Key.Destination.Is6() && l.IPv6Available) || (flow.Key.Destination.Is4() && l.IPv4Available)
+		if l.Available && l.Enabled && familyOK {
+			eligible = true
+			break
+		}
+	}
+	if !eligible {
 		request.Complete(true)
 		return
 	}
+	owner := e.owners.resolve(flow)
 	var queue waiter.Queue
 	endpoint, tcpErr := request.CreateEndpoint(&queue)
 	if tcpErr != nil {
 		request.Complete(true)
-		upstream.Close()
-		lease.Release()
 		return
 	}
 	request.Complete(false)
 	application := gonet.NewTCPConn(&queue, endpoint)
 	managed = true
-	go e.bridgeTCP(flow, application, upstream, lease)
+	go e.connectTCP(flow, application, owner)
+}
+
+func (e *ForwardingStack) connectTCP(flow Flow, application net.Conn, owner flowOwner) {
+	stop := context.AfterFunc(e.ctx, func() { application.Close() })
+	defer stop()
+	var prefix []byte
+	var service string
+	if flow.Key.DestinationPort == 443 || flow.Key.DestinationPort == 8443 {
+		prefix, service = inspectTLSService(application)
+	}
+	if e.ctx.Err() != nil {
+		application.Close()
+		e.flows.Retire(flow.Key, tcpRetireGrace)
+		e.endFlow(protocolTCP)
+		return
+	}
+	upstream, lease, err := e.openUpstreamForService(flow, "tcp", owner, service)
+	if err != nil {
+		application.Close()
+		e.flows.Retire(flow.Key, tcpRetireGrace)
+		e.endFlow(protocolTCP)
+		return
+	}
+	e.bridgeTCPWithPrefix(flow, application, upstream, lease, prefix)
 }
 
 func (e *ForwardingStack) handleUDP(request *udp.ForwarderRequest) bool {
@@ -457,8 +488,13 @@ func requestMatchesFlow(remoteAddress tcpip.Address, remotePort uint16, flow Flo
 
 func (e *ForwardingStack) openUpstream(flow Flow, transport string) (net.Conn, *Lease, error) {
 	owner := e.owners.resolve(flow)
+	return e.openUpstreamForService(flow, transport, owner, "")
+}
+
+func (e *ForwardingStack) openUpstreamForService(flow Flow, transport string, owner flowOwner, service string) (net.Conn, *Lease, error) {
 	id := e.diagnostics.begin(flow, owner, transport)
-	cohort := cohortFor(flow, owner)
+	e.diagnostics.setService(id, service)
+	cohort := cohortFor(flow, owner, service)
 	excluded := make(map[uint32]struct{})
 	var lastErr error
 	address := net.JoinHostPort(flow.Key.Destination.String(), strconv.Itoa(int(flow.Key.DestinationPort)))
@@ -538,6 +574,10 @@ func verifyUpstreamInterface(conn net.Conn, index uint32) error {
 }
 
 func (e *ForwardingStack) bridgeTCP(flow Flow, application, upstream net.Conn, lease *Lease) {
+	e.bridgeTCPWithPrefix(flow, application, upstream, lease, nil)
+}
+
+func (e *ForwardingStack) bridgeTCPWithPrefix(flow Flow, application, upstream net.Conn, lease *Lease, prefix []byte) {
 	defer e.endFlow(protocolTCP)
 	defer func() { application.Close(); upstream.Close(); e.flows.Retire(flow.Key, tcpRetireGrace) }()
 	defer lease.Release()
@@ -560,7 +600,7 @@ func (e *ForwardingStack) bridgeTCP(flow Flow, application, upstream net.Conn, l
 	}
 	results := make(chan copyResult, 2)
 	go func() {
-		n, err := io.Copy(flowByteWriter{destination: upstream, report: func(bytes uint64) { lease.Report(bytes, 0); refreshDeadline() }}, application)
+		n, err := io.Copy(flowByteWriter{destination: upstream, report: func(bytes uint64) { lease.Report(bytes, 0); refreshDeadline() }}, io.MultiReader(bytes.NewReader(prefix), application))
 		if closer, ok := upstream.(interface{ CloseWrite() error }); ok {
 			_ = closer.CloseWrite()
 		}

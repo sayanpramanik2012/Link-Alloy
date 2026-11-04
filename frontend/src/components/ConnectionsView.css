@@ -4,3 +4,8 @@
   color: var(--muted);
   font-size: 10px;
 }
+
+.connection-filters { margin-bottom: 12px; }
+.flow-state { display: inline-block; padding: 4px 7px; border: 1px solid var(--border); border-radius: 5px; font-size: 10px; text-transform: capitalize; color: var(--text-muted); }
+.flow-state[data-state="active"] { color: var(--emerald); border-color: #3c5147; background: #1d2b24; }
+.flow-state[data-state="dial failed"] { color: var(--danger); border-color: #6c403a; }

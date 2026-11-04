@@ -13,6 +13,7 @@ type FlowSnapshot struct {
 	ID               uint64    `json:"id"`
 	ProcessID        uint32    `json:"processId"`
 	ProcessName      string    `json:"processName"`
+	ServiceName      string    `json:"serviceName"`
 	Protocol         string    `json:"protocol"`
 	LocalPort        uint16    `json:"localPort"`
 	RemotePort       uint16    `json:"remotePort"`
@@ -35,6 +36,14 @@ type flowRegistry struct {
 	mu    sync.Mutex
 	next  uint64
 	flows map[uint64]*diagnosticFlow
+}
+
+func (r *flowRegistry) setService(id uint64, service string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if f := r.flows[id]; f != nil {
+		f.ServiceName = service
+	}
 }
 
 func (r *flowRegistry) begin(flow Flow, owner flowOwner, protocol string) uint64 {

@@ -1,6 +1,7 @@
 import type { AdapterSummary, LinkStatus } from "../types";
 import type { TransportStats } from "../types";
 import { NoticesPanel } from "./NoticesPanel";
+import { Icon } from "./Icon";
 
 export type LinkPolicy = { enabled: boolean; weight: number; dirty: boolean };
 
@@ -42,7 +43,7 @@ export function SettingsView({ adapters, links, policies, tunnelState, logPath, 
               return (
                 <article className={`policy-row ${current.enabled ? "" : "policy-row-disabled"}`} key={adapter.index}>
                   <div className="policy-link">
-                    <span className={`link-glyph ${adapter.kind}`} aria-hidden="true">{adapter.kind === "wifi" ? "≈" : adapter.kind === "ethernet" ? "⇄" : adapter.kind === "cellular" ? "▥" : "⌁"}</span>
+                    <span className={`link-glyph ${adapter.kind}`}><Icon name={adapter.kind === "wifi" ? "wifi" : adapter.kind === "cellular" ? "cellular" : "ethernet"} /></span>
                     <div><strong>{adapter.name}</strong><small>{adapter.kindLabel} · {link?.health ?? (link?.available ? "Online" : adapter.isUp ? "Connected" : "Offline")}</small></div>
                   </div>
                   <label className="policy-toggle">

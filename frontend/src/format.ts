@@ -11,7 +11,11 @@ export function formatBytes(value: number) {
   return `${amount.toFixed(digits)} ${units[unit]}`;
 }
 
-export function formatRate(bytesPerSecond: number) {
+export function formatRate(bytesPerSecond: number, unit: "bits" | "bytes" = "bytes") {
+  if (unit === "bits") {
+    const mbps = Math.max(0, Number.isFinite(bytesPerSecond) ? bytesPerSecond : 0) * 8 / 1_000_000;
+    return `${mbps.toFixed(mbps > 0 && mbps < 100 ? 1 : 0)} Mbps`;
+  }
   if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return "0 B/s";
   return `${formatBytes(bytesPerSecond)}/s`;
 }

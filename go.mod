@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	github.com/wailsapp/wails/v3 v3.0.0-alpha2.119
+	golang.org/x/net v0.59.0
 	golang.org/x/sys v0.48.0
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
 	gvisor.dev/gvisor v0.0.0-20261010064756-cd110d9dec04
