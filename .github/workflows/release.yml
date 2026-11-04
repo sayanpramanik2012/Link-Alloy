@@ -131,7 +131,9 @@ jobs:
           $version = $env:GITHUB_REF_NAME.Substring(1)
           $releaseDir = Join-Path $env:RUNNER_TEMP 'linkalloy-release'
           New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-          $portable = Join-Path $releaseDir 'Link Alloy Portable.exe'
+          # GitHub normalizes spaces to dots in asset filenames. Use that
+          # spelling for the file and checksum, with a readable asset label.
+          $portable = Join-Path $releaseDir 'Link.Alloy.Portable.exe'
           Copy-Item -LiteralPath 'bin/linkalloy.exe' -Destination $portable
           $fileVersion = (Get-Item -LiteralPath $portable).VersionInfo.ProductVersion
           if ($fileVersion -ne $version) { throw "Executable version mismatch: $fileVersion vs $version" }
@@ -150,7 +152,7 @@ jobs:
           $tag = $env:GITHUB_REF_NAME
           $version = $tag.Substring(1)
           $notes = ".github/release-notes/$tag.md"
-          $assets = @('${{ steps.assets.outputs.portable }}','${{ steps.assets.outputs.checksums }}')
+          $assets = @('${{ steps.assets.outputs.portable }}#Link Alloy Portable.exe','${{ steps.assets.outputs.checksums }}')
           $releaseArgs = @('release','create',$tag) + $assets + @('--title',"Link Alloy $version",'--notes-file',$notes,'--verify-tag')
           if ([int]$version.Split('.')[0] -eq 0 -or $version -match '-') { $releaseArgs += '--prerelease' }
           gh @releaseArgs
