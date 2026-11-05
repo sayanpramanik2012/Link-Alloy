@@ -263,6 +263,7 @@ function App() {
           {errors.refreshError && <div className="refresh-warning" role="status">Some live data is delayed: {errors.refreshError}</div>}
           {notice && <div className="toast-banner toast-success" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice("")} aria-label="Dismiss message">×</button></div>}
 
+          <div className={`view-content view-${view}`} key={view}>
           {view === "overview" && (
             <OverviewView
               adapters={adapters}
@@ -282,8 +283,6 @@ function App() {
               transport={status.transport}
               usableLinks={usableLinks}
               connectedInterfaces={connectedInterfaces}
-              logs={logs}
-              logPath={logPath}
             />
           )}
           {view === "connections" && <ConnectionsView adapters={adapters} links={links} active={tunnelActive} transport={status.transport} flows={status.flows} preview={previewMode} />}
@@ -304,6 +303,7 @@ function App() {
               onCopyLogPath={() => void copyLogPath()}
             />
           )}
+          </div>
 
           <footer className="app-footer">
             <span>Link Alloy · Windows network control</span>
@@ -333,9 +333,11 @@ function OverviewView(props: {
   transport?: RuntimeStatus["transport"];
   usableLinks: number;
   connectedInterfaces: number;
-  logs: TunnelLogEntry[];
-  logPath: string;
 }) {
+  const [linkPage, setLinkPage] = useState(0);
+  const lastLinkPage = Math.max(0, Math.ceil(props.adapters.length / 2) - 1);
+  const currentPage = Math.min(linkPage, lastLinkPage);
+  const visibleAdapters = props.adapters.slice(currentPage * 2, currentPage * 2 + 2);
   const byIndex = new Map(props.links.map((link) => [link.index, link]));
   const stateText = props.preview ? "Dashboard layout preview" : props.busy ? "Updating routes" : props.active ? "Network routing is on" : props.status.state === "error" ? "The tunnel needs attention" : "System routing is paused";
   const stateHelp = props.preview
@@ -376,31 +378,31 @@ function OverviewView(props: {
         </div>
 
         <ThroughputChart samples={props.history} download={props.downloadRate} upload={props.uploadRate} loading={props.busy} preview={props.preview} />
-        <ActivityFeed entries={props.logs} compact path={props.logPath} />
       </div>
 
       <aside className="overview-rail">
         <section className="panel network-panel" aria-labelledby="network-links-title">
           <div className="panel-header">
             <div><p className="eyebrow">AVAILABLE PATHS</p><h2 id="network-links-title">Network links</h2></div>
-            <span className="panel-caption">{props.adapters.length} adapter{props.adapters.length === 1 ? "" : "s"} detected</span>
+            <div className="link-pagination">
+              <span className="panel-caption">{props.adapters.length} links</span>
+              {lastLinkPage > 0 && <>
+                <button className="secondary-button" type="button" aria-label="Previous network links" disabled={currentPage === 0} onClick={() => setLinkPage(currentPage - 1)}>‹</button>
+                <span className="panel-caption">{currentPage + 1} / {lastLinkPage + 1}</span>
+                <button className="secondary-button" type="button" aria-label="Next network links" disabled={currentPage === lastLinkPage} onClick={() => setLinkPage(currentPage + 1)}>›</button>
+              </>}
+            </div>
           </div>
           {props.initialLoading ? (
             <div className="skeleton-list" aria-label="Loading network links"><span /><span /></div>
           ) : props.adapters.length === 0 ? (
             <div className="empty-panel"><strong>No network links detected</strong><p>Connect Ethernet, Wi-Fi, or a tethered device and refresh.</p></div>
           ) : (
-            <div className="link-card-list">
-              {props.adapters.map((adapter) => <LinkCard key={adapter.index} adapter={adapter} link={byIndex.get(adapter.index)} tunnelActive={props.active} downloadShare={props.downloadRate > 0 ? (byIndex.get(adapter.index)?.recvBytesPerSec ?? 0) / props.downloadRate * 100 : 0} />)}
+            <div className="link-card-list" tabIndex={0} role="region" aria-label="Network link details">
+              {visibleAdapters.map((adapter) => <LinkCard key={adapter.index} adapter={adapter} link={byIndex.get(adapter.index)} tunnelActive={props.active} downloadShare={props.downloadRate > 0 ? (byIndex.get(adapter.index)?.recvBytesPerSec ?? 0) / props.downloadRate * 100 : 0} />)}
             </div>
           )}
           <p className="section-footnote">Traffic totals include Link Alloy flows only. Link health is measured by an egress check.</p>
-        </section>
-        <section className="panel operating-panel">
-          <p className="eyebrow">OPERATING MODEL</p>
-          <h2>One link per connection</h2>
-          <p>New connections are spread across eligible links within each application and service. A single connection stays on its assigned adapter. Open Connections to inspect actual traffic.</p>
-          <div className="operating-protocols"><span>IPv4 + IPv6</span><span>TCP + UDP</span></div>
         </section>
       </aside>
     </div>

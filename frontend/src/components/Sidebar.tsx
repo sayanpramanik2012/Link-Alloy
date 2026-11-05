@@ -38,7 +38,7 @@ export function Sidebar({ active, onChange }: Props) {
       </nav>
       <div className="sidebar-bottom">
         <span className="sidebar-version"><i aria-hidden="true" /> Alpha development</span>
-        <span className="sidebar-foot">0.0.3</span>
+        <span className="sidebar-foot">0.0.4</span>
       </div>
     </aside>
   );

@@ -464,21 +464,28 @@ func (e *ForwardingStack) handleUDP(request *udp.ForwarderRequest) bool {
 		}
 	}()
 	e.flows.MarkManaged(flow.Key)
-	upstream, lease, err := e.openUpstream(flow, "udp")
-	if err != nil {
-		return false
-	}
 	var queue waiter.Queue
 	endpoint, tcpErr := request.CreateEndpoint(&queue)
 	if tcpErr != nil {
-		upstream.Close()
-		lease.Release()
 		return false
 	}
 	application := gonet.NewUDPConn(&queue, endpoint)
 	managed = true
-	go e.bridgeUDP(flow, application, upstream, lease)
+	// Register the endpoint (which queues the first datagram) before returning.
+	// Dialing in this callback blocks InjectInbound and every later TUN packet.
+	go e.connectUDP(flow, application)
 	return true
+}
+
+func (e *ForwardingStack) connectUDP(flow Flow, application *gonet.UDPConn) {
+	upstream, lease, err := e.openUpstream(flow, "udp")
+	if err != nil {
+		application.Close()
+		e.flows.Remove(flow.Key)
+		e.endFlow(protocolUDP)
+		return
+	}
+	e.bridgeUDP(flow, application, upstream, lease)
 }
 
 func requestMatchesFlow(remoteAddress tcpip.Address, remotePort uint16, flow Flow) bool {

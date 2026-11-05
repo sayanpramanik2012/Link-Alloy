@@ -70,7 +70,7 @@ export function ThroughputChart({ samples, download, upload, loading, preview = 
         {enoughSamples ? (
           <svg className="throughput-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={preview ? "Sample combined upload and download rates for layout preview, not live" : "Combined upload and download rates sampled from Link Alloy link counters"}>
             <title>{preview ? "Sample throughput values for visual layout review" : "Combined throughput from real per-link byte counters"}</title>
-            <desc>Emerald is download; cyan is upload. {preview ? "Values are preview samples and are not live." : "Points are sampled while the tunnel is active."}</desc>
+            <desc>Blue is download; gray is upload. {preview ? "Values are preview samples and are not live." : "Points are sampled while the tunnel is active."}</desc>
             <line x1={inset} y1={height - inset} x2={width - inset} y2={height - inset} className="chart-axis" />
             <line x1={inset} y1={height / 2} x2={width - inset} y2={height / 2} className="chart-gridline" />
             <path d={areaFor(downloadPath)} className="chart-area chart-area-download" />

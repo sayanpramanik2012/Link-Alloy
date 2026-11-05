@@ -16,7 +16,7 @@ jobs:
   release:
     runs-on: windows-2025
     env:
-      UNSIGNED_ALPHA: ${{ github.ref_name == 'v0.0.1' || github.ref_name == 'v0.0.2' || github.ref_name == 'v0.0.3' }}
+      UNSIGNED_ALPHA: ${{ github.ref_name == 'v0.0.1' || github.ref_name == 'v0.0.2' || github.ref_name == 'v0.0.3' || github.ref_name == 'v0.0.4' }}
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6

@@ -2,7 +2,9 @@
 
 release-ready: false
 
-The readiness flag blocks signed/stable releases. The tags `v0.0.1`, `v0.0.2`, and `v0.0.3` are explicitly permitted unsigned alphas and are published as portable prereleases only. Version 0.0.3 adds TLS service grouping, family-specific allocation stability, improved UI, and bounded diagnostic tools. The user explicitly approved its publication after the performance comparison failed acceptance. Publication does not satisfy the stable gates below.
+The readiness flag blocks signed/stable releases. The tags `v0.0.1`, `v0.0.2`, `v0.0.3`, and `v0.0.4` are explicitly permitted unsigned alphas and are published as portable prereleases only. Version 0.0.3 added TLS service grouping, family-specific allocation stability, improved UI, and bounded diagnostic tools. Version 0.0.4 adds a fixed-window dashboard and tested fixes for blocking UDP setup and retry-induced scheduling resets. The user authorized 0.0.4 on 6 November for local testing with the remaining issues documented. Publication does not satisfy the stable gates below.
+
+The [5 November review](LOCAL_CODE_REVIEW_2026-11-05.md) identifies open watchdog/cleanup, TCP half-close, startup-policy, diagnostics, and overall dial-budget issues. These are not fixed by 0.0.4. Do not use this alpha for deliberate crash or adapter-loss testing; stop the tunnel normally.
 
 Observed 4 November short samples: direct Ethernet 94–124 Mbps; direct Wi-Fi 30–31 Mbps; corrected timed test through the tunnel about 87 Mbps; Steam before pausing about 105–109 Mbps. These are sequential samples with variable network conditions, not a proven combined-speed increase or a conclusive measurement of engine overhead. The post-resume comparison was interrupted and remains incomplete. See [diagnosis and measurement record](DOWNLOAD_DIAGNOSIS_2026-11-04.md).
 

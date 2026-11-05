@@ -136,6 +136,32 @@ func (s *Scheduler) acquire(excluded map[uint32]struct{}, ipv6 *bool) (*Lease, e
 func (s *Scheduler) acquireCohort(key string, excluded map[uint32]struct{}, ipv6 *bool) (*Lease, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A fallback is part of the same connection, not a new allocation. Select
+	// an alternate without changing the cohort's credits or eligibility history.
+	if len(excluded) > 0 {
+		var alternate *linkState
+		for _, idx := range s.order {
+			st := s.links[idx]
+			l := st.link
+			if !l.Available || l.Disabled {
+				continue
+			}
+			if _, skip := excluded[idx]; skip {
+				continue
+			}
+			if ipv6 != nil && l.FamiliesKnown && ((*ipv6 && !l.IPv6Available) || (!*ipv6 && !l.IPv4Available)) {
+				continue
+			}
+			if alternate == nil || l.Weight > alternate.link.Weight {
+				alternate = st
+			}
+		}
+		if alternate == nil {
+			return nil, ErrNoHealthyLink
+		}
+		alternate.active++
+		return &Lease{scheduler: s, index: alternate.link.Index, state: alternate}, nil
+	}
 	group := s.cohorts[key]
 	if group == nil {
 		if len(s.cohorts) >= 1024 {

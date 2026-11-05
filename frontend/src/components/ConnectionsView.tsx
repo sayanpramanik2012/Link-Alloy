@@ -28,7 +28,7 @@ export function ConnectionsView({ adapters, links, active, transport, preview = 
   function clearFilters() { setQuery(""); setLinkFilter("all"); setStateFilter("active"); }
 
   return (
-    <div className="page-stack">
+    <div className="page-stack" role="region" aria-label="Connection details" tabIndex={0}>
       <section className="connection-summary-grid" aria-label="Connection summary">
         <div className="summary-tile"><span>Active connections</span><strong>{active ? activeConnections : 0}</strong><small>{preview ? "Preview sample" : active && transport ? `${transport.activeTCP ?? 0} TCP · ${transport.activeUDP ?? 0} UDP` : active ? "Current tunnel session" : "Tunnel stopped"}</small></div>
         <div className="summary-tile"><span>Eligible links</span><strong>{active ? links.filter((link) => link.available && link.enabled !== false).length : 0}</strong><small>Available for new flows</small></div>

@@ -32,7 +32,7 @@ export function LinkCard({ adapter, link, tunnelActive, downloadShare = 0 }: Pro
         <span className={`link-glyph ${adapter.kind}`}><Icon name={adapter.kind === "wifi" ? "wifi" : adapter.kind === "cellular" ? "cellular" : "ethernet"} /></span>
         <div className="link-title">
           <h3 title={adapter.name}>{adapter.name}</h3>
-          <span>{adapter.kindLabel}{link && ` · weight ${link.weight}`}</span>
+          <span>{adapter.kindLabel}{link && ` · weight ${link.weight}`}{tunnelActive && link && ` · ${link.activeConnections} connections`}</span>
         </div>
         <span className={`health-pill ${tunnelActive && link?.health === "degraded" ? "health-pill-warning" : healthy ? "health-pill-up" : "health-pill-down"}`}>
           <i aria-hidden="true" />{label}
@@ -45,20 +45,14 @@ export function LinkCard({ adapter, link, tunnelActive, downloadShare = 0 }: Pro
           <div className="link-metrics">
             <div className="link-metric">
               <span className="metric-label metric-download"><i aria-hidden="true" />Download</span>
-              <strong>{formatRate(link.recvBytesPerSec, unit)}</strong>
-              <small>{formatBytes(link.bytesReceived)} received</small>
+              <strong title={`${formatBytes(link.bytesReceived)} received this session`}>{formatRate(link.recvBytesPerSec, unit)}</strong>
             </div>
             <div className="link-metric">
               <span className="metric-label metric-upload"><i aria-hidden="true" />Upload</span>
-              <strong>{formatRate(link.sendBytesPerSec, unit)}</strong>
-              <small>{formatBytes(link.bytesSent)} sent</small>
+              <strong title={`${formatBytes(link.bytesSent)} sent this session`}>{formatRate(link.sendBytesPerSec, unit)}</strong>
             </div>
           </div>
           <div className="link-share"><span>Current download share</span><strong>{Math.round(downloadShare)}%</strong><div className="link-share-track" aria-hidden="true"><span style={{ width: `${Math.max(0, Math.min(100, downloadShare))}%` }} /></div></div>
-          <div className="link-card-foot">
-            <span>{link.activeConnections} active {link.activeConnections === 1 ? "connection" : "connections"}</span>
-            <span>{adapter.index} · MTU {adapter.mtu || "—"}</span>
-          </div>
         </>
       ) : (
         <div className="link-card-foot link-card-foot-idle">

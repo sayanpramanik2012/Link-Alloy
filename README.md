@@ -36,7 +36,7 @@ It addresses a practical problem: a Windows PC can have multiple independent int
 
 Link Alloy captures supported routed traffic through a Windows tunnel, assigns each new TCP or UDP connection to a healthy link, and binds the upstream socket to that adapter. Version 0.0.3 separates supported TLS services within each application and preserves allocation history across unrelated IP-family health changes. The dashboard shows link health, active connections, throughput, totals, service diagnostics, and recent activity.
 
-**Performance status:** 0.0.3 is an experimental alpha and has not passed the combined-throughput comparison. Short samples measured direct Ethernet at 94–124 Mbps, Wi-Fi at 30–31 Mbps, and a timed transfer through the tunnel at about 87 Mbps. These sequential samples do not establish a speed gain; investigation continues. See the [measurement record](docs/DOWNLOAD_DIAGNOSIS_2026-11-04.md).
+**Current release:** 0.0.4 is an experimental alpha with a fixed-window dashboard and regression-tested fixes for blocking UDP setup and retry scheduling. It has not passed the combined-throughput comparison. Historical short samples measured direct Ethernet at 94–124 Mbps, Wi-Fi at 30–31 Mbps, and a timed transfer through the tunnel at about 87 Mbps. These sequential samples do not establish a speed gain or describe fresh 0.0.4 measurements. See the [measurement record](docs/DOWNLOAD_DIAGNOSIS_2026-11-04.md) and [code review with remaining issues](docs/LOCAL_CODE_REVIEW_2026-11-05.md). Recovery hardening remains open; stop the tunnel normally and avoid deliberate crash/failover tests with this alpha.
 
 Link Alloy is connection-level scheduling:
 
@@ -135,7 +135,7 @@ This repository is Windows-only. Android, iOS, Linux, macOS, and Docker build sc
 
 Local checks include Go tests, lifecycle tests, go vet, packet-parser fuzzing, Go vulnerability scanning, frontend state tests, production frontend build, dependency audit, Wintun hash/signature verification, and a Windows executable build.
 
-The `v0.0.1`, `v0.0.2`, and `v0.0.3` alphas are explicitly permitted unsigned portable prereleases. The user approved 0.0.3 for further testing with the performance limitation documented. Other public releases remain blocked until forced-process recovery, physical link-loss failover, a successful controlled launcher comparison, and Windows signing secrets are completed. See the [research and implementation record](docs/MULTILINK_RESEARCH_AND_IMPLEMENTATION.md).
+The `v0.0.1`, `v0.0.2`, `v0.0.3`, and `v0.0.4` alphas are explicitly permitted unsigned portable prereleases. Version 0.0.4 was authorized for further testing with the performance and recovery limitations documented. Other public releases remain blocked until forced-process recovery, physical link-loss failover, a successful controlled launcher comparison, and Windows signing secrets are completed. See the [research and implementation record](docs/MULTILINK_RESEARCH_AND_IMPLEMENTATION.md).
 
 ## Independent implementation
 

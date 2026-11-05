@@ -53,7 +53,7 @@ export function ActivityFeed({ entries, compact = false, path }: Props) {
           {entries.length === 0 ? "Tunnel state, link health and connection events will be recorded here." : "No log entries match this filter."}
         </div>
       ) : (
-        <ol className="log-list" aria-live="polite">
+        <ol className="log-list" tabIndex={0} aria-label="Recorded engine events">
           {visible.map((entry, index) => (
             <li className={`log-entry log-${entry.level}`} key={`${entry.at}-${entry.category}-${index}`}>
               <time dateTime={entry.at} title={new Date(entry.at).toLocaleString()}>{formatTime(entry.at)}</time>

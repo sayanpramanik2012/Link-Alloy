@@ -2,6 +2,7 @@ import type { AdapterSummary, LinkStatus } from "../types";
 import type { TransportStats } from "../types";
 import { NoticesPanel } from "./NoticesPanel";
 import { Icon } from "./Icon";
+import { useState } from "react";
 
 export type LinkPolicy = { enabled: boolean; weight: number; dirty: boolean };
 
@@ -21,6 +22,7 @@ type Props = {
 };
 
 export function SettingsView({ adapters, links, policies, tunnelState, logPath, transport, preview = false, configureAvailable, savingIndex, onPolicyChange, onApplyPolicy, onCopyLogPath }: Props) {
+  const [section, setSection] = useState("links");
   const linksByIndex = new Map(links.map((link) => [link.index, link]));
   const checkedLinks = links.filter((link) => link.health && link.health !== "idle" && link.health !== "probing");
   const ipv4State = preview ? "Preview sample" : tunnelState !== "running" ? "Checked when tunnel starts" : checkedLinks.length === 0 ? "Checking…" : checkedLinks.some((link) => link.ipv4Available) ? "Available" : "Unavailable";
@@ -28,6 +30,11 @@ export function SettingsView({ adapters, links, policies, tunnelState, logPath, 
 
   return (
     <div className="page-stack">
+      <div className="section-switcher" role="group" aria-label="Settings section">
+        {[["links", "Link policy"], ["monitoring", "Health & logs"], ["diagnostics", "Diagnostics"], ["about", "About & notices"]].map(([id, label]) => <button key={id} type="button" aria-pressed={section === id} onClick={() => setSection(id)}>{label}</button>)}
+      </div>
+      <div className="settings-content" tabIndex={0} role="region" aria-label="Settings details">
+      {section === "links" && <>
       <section className="panel settings-panel" aria-labelledby="link-policy-title">
         <div className="panel-header">
           <div><p className="eyebrow">FLOW ALLOCATION</p><h2 id="link-policy-title">Network link policy</h2></div>
@@ -80,8 +87,9 @@ export function SettingsView({ adapters, links, policies, tunnelState, logPath, 
         {!configureAvailable && <p className="settings-note">{preview ? "Settings are disabled in visual preview." : "Per-link settings are not available in this backend build yet."}</p>}
         {tunnelState === "running" && <p className="settings-note settings-note-active">Policy changes affect new connections. Existing connections remain on their assigned link.</p>}
       </section>
+      </>}
 
-      <section className="settings-grid">
+      {section === "monitoring" && <section className="settings-grid">
         <article className="panel settings-card">
           <p className="eyebrow">HEALTH CHECKS</p>
           <h2>Internet path monitoring</h2>
@@ -94,9 +102,9 @@ export function SettingsView({ adapters, links, policies, tunnelState, logPath, 
           <p className="log-path-value">{logPath || "%ProgramData%\\Link Alloy\\logs\\engine.jsonl"}</p>
           <button className="secondary-button" type="button" onClick={onCopyLogPath}>Copy log location</button>
         </article>
-      </section>
+      </section>}
 
-      <section className="panel diagnostics-panel" aria-labelledby="transport-diagnostics-title">
+      {section === "diagnostics" && <section className="panel diagnostics-panel" aria-labelledby="transport-diagnostics-title">
         <div className="panel-header">
           <div><p className="eyebrow">ENGINE DIAGNOSTICS</p><h2 id="transport-diagnostics-title">Packet counters</h2></div>
           <span className="panel-caption">No packet contents are recorded</span>
@@ -113,8 +121,9 @@ export function SettingsView({ adapters, links, policies, tunnelState, logPath, 
         ) : (
           <p className="settings-note">Start the tunnel to see transport counters from the active session.</p>
         )}
-      </section>
+      </section>}
 
+      {section === "about" && <>
       <section className="panel support-panel">
         <p className="eyebrow">PROTOCOL COVERAGE</p>
         <h2>Current prototype boundaries</h2>
@@ -125,6 +134,8 @@ export function SettingsView({ adapters, links, policies, tunnelState, logPath, 
         </div>
       </section>
       {!preview && <NoticesPanel />}
+      </>}
+      </div>
     </div>
   );
 }
